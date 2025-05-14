@@ -9,7 +9,8 @@
 #include "freertos/task.h"
 #include <ESP_I2S.h>
 #include "FS.h"
-#include "FFat.h" // For FAT filesystem support
+#include "LittleFS.h" // For LittleFS filesystem support
+#include <esp_heap_caps.h>  // For PSRAM allocation
 
 // I2S configuration
 i2s_data_bit_width_t bps = I2S_DATA_BIT_WIDTH_32BIT;
@@ -28,7 +29,16 @@ File mp3File;
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("I2S MP3 player from FATFS");
+  Serial.println("I2S MP3 player from LittleFS with PSRAM");
+  
+  // Check PSRAM availability
+  uint32_t psramSize = ESP.getPsramSize();
+  if (psramSize > 0) {
+    Serial.printf("PSRAM size: %d bytes\n", psramSize);
+  } else {
+    Serial.println("PSRAM not available! Code requires PSRAM.");
+    while(1); // Stop execution
+  }
   
   // Initialize SD card
   pinMode(SD_MODE, OUTPUT);
@@ -51,65 +61,98 @@ void setup() {
   ESP_SR.begin(i2s, sr_commands, sizeof(sr_commands) / sizeof(sr_cmd_t), SR_CHANNELS_STEREO, SR_MODE_WAKEWORD);
   Serial.println("Start ESP_SR");
   
-  // Initialize filesystem
-  if (!FFat.begin()) {
-    Serial.println("FFat Mount Failed");
-    return;
+  // Initialize LittleFS
+  if (!LittleFS.begin(false)) { // false doesn't format if mount fails
+    Serial.println("LittleFS Mount Failed, trying to format...");
+    if (!LittleFS.begin(true)) { // true formats the filesystem if mounting fails
+      Serial.println("LittleFS Format Failed");
+      return;
+    }
+    Serial.println("LittleFS Formatted Successfully");
   }
-  Serial.println("FFat Mounted Successfully");
+  Serial.println("LittleFS Mounted Successfully");
 
+  // List files in LittleFS
+  listDir(LittleFS, "/", 0);
+}
+
+void loop() {
   // Open MP3 file
-  mp3File = FFat.open("/test.mp3", "r");
+/*   mp3File = LittleFS.open("/test.mp3", "r");
   if (!mp3File) {
     Serial.println("Failed to open test.mp3");
+    delay(5000);
     return;
   }
   
   Serial.print("MP3 file size: ");
   Serial.println(mp3File.size());
-}
-
-void loop() {
-  // Check if file is available and play it
-  if (mp3File) {
-    // Read the entire MP3 file into memory
-    // Note: This method will only work for MP3 files that fit in available RAM
-    size_t fileSize = mp3File.size();
-    uint8_t *mp3Buffer = (uint8_t *)malloc(fileSize);
+  
+  // Read the entire MP3 file into PSRAM
+  size_t fileSize = mp3File.size(); */
+  
+/*   // Allocate in PSRAM instead of regular RAM
+  uint8_t *mp3Buffer = (uint8_t *)heap_caps_malloc(fileSize, MALLOC_CAP_SPIRAM);
+  
+  if (mp3Buffer) {
+    Serial.println("Reading MP3 file into PSRAM...");
+    size_t bytesRead = mp3File.read(mp3Buffer, fileSize);
     
-    if (mp3Buffer) {
-      Serial.println("Reading MP3 file...");
-      size_t bytesRead = mp3File.read(mp3Buffer, fileSize);
+    if (bytesRead == fileSize) {
+      Serial.println("Playing MP3...");
+      // Play the MP3 file
+      bool result = i2s.playMP3(mp3Buffer, fileSize);
       
-      if (bytesRead == fileSize) {
-        Serial.println("Playing MP3...");
-        // Play the MP3 file
-        bool result = i2s.playMP3(mp3Buffer, fileSize);
-        
-        if (!result) {
-          Serial.println("Error playing MP3");
-        } else {
-          Serial.println("MP3 playback complete");
-        }
+      if (!result) {
+        Serial.println("Error playing MP3");
       } else {
-        Serial.println("Failed to read complete MP3 file");
+        Serial.println("MP3 playback complete");
       }
-      
-      free(mp3Buffer);
     } else {
-      Serial.println("Not enough memory to load MP3 file");
+      Serial.println("Failed to read complete MP3 file");
     }
     
-    // Close the file
-    mp3File.close();
-    
-    // Don't repeat immediately
-    delay(5000);
-    
-    // Reopen the file for next playback
-    mp3File = FFat.open("/test.mp3", "r");
+    // Free PSRAM
+    heap_caps_free(mp3Buffer);
   } else {
-    Serial.println("MP3 file not available");
-    delay(5000);
+    Serial.println("Not enough PSRAM to load MP3 file");
+  }
+  
+  // Close the file
+  mp3File.close();
+   */
+  // Don't repeat immediately
+  delay(5000);
+}
+
+// Utility function to list all files in LittleFS
+void listDir(fs::FS &fs, const char * dirname, uint8_t levels) {
+  Serial.printf("Listing directory: %s\n", dirname);
+
+  File root = fs.open(dirname);
+  if (!root) {
+    Serial.println("Failed to open directory");
+    return;
+  }
+  if (!root.isDirectory()) {
+    Serial.println("Not a directory");
+    return;
+  }
+
+  File file = root.openNextFile();
+  while (file) {
+    if (file.isDirectory()) {
+      Serial.print("  DIR : ");
+      Serial.println(file.name());
+      if (levels) {
+        listDir(fs, file.path(), levels - 1);
+      }
+    } else {
+      Serial.print("  FILE: ");
+      Serial.print(file.name());
+      Serial.print("  SIZE: ");
+      Serial.println(file.size());
+    }
+    file = root.openNextFile();
   }
 }

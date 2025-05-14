@@ -1,0 +1,11 @@
+build/
+sdkconfig
+sdkconfig.old
+target
+.vscode
+managed_components/
+dependencies.lock
+test/*/5.0
+test/*/4.4
+__pycache__
+pytest_log

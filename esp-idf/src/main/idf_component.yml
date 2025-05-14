@@ -1,0 +1,3 @@
+dependencies:
+  espressif/esp-sr: ^2.1.0
+  espressif/esp_audio_codec: ^2.3.0
