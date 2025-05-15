@@ -233,21 +233,11 @@ void spi_oled_draw_circle(struct spi_ssd1327 *spi_ssd1327, uint8_t x,
     spi_oled_send_cmd(spi_ssd1327, y + 16 - 1);
 
     /* Draw the 16 pixel diameter circle */
-    for (int j = 0; j < 16; j++)
-    {
         /* 8 bits per array element * 16 rows * (16 columns / 2 pixels per column) */
         spi_oled_send_data(spi_ssd1327, &whitecircle16[0], 8 * 16 * (16 / 2));
-    }
     /* }}} */
 }
 
-// Assumed font structure
-typedef struct
-{
-    uint8_t width;
-    uint8_t height;
-    const uint8_t *data; // Packed [num_chars][bytes_per_char]
-} font_t;
 
 /*
 const uint8_t font8x8_basic[95][8] = { };
@@ -303,19 +293,56 @@ void spi_oled_drawImage(
     struct spi_ssd1327 *spi_ssd1327,
     uint8_t x, uint8_t y,
     uint8_t width, uint8_t height,
-    const uint8_t *image // packed 4bpp: (width+1)/2 per row
+    const uint8_t *image // packed 4bpp: (width+1)/2 bytes per row
 )
 {
+    // Calculate GDDRAM column addresses (0-63 range for SSD1327)
+    // Each GDDRAM column byte stores two 4-bit pixels.
+    uint8_t start_col_byte_addr = x / 2;
+    uint8_t image_bytes_per_row = (width + 1) / 2; // Number of bytes for 'width' pixels in the image data
+
+    // Ensure image_bytes_per_row is at least 1 if width > 0
+    if (width > 0 && image_bytes_per_row == 0) {
+        image_bytes_per_row = 1;
+    }
+    
+    uint8_t end_col_byte_addr;
+    if (width == 0) { // Handle zero width case
+        end_col_byte_addr = start_col_byte_addr;
+    } else {
+        // The end column address for the *write window* is based on how many bytes we send.
+        end_col_byte_addr = start_col_byte_addr + image_bytes_per_row - 1;
+    }
+
+
+    // Clamp addresses to valid GDDRAM range (0-63 for columns, 0-127 for rows)
+    if (start_col_byte_addr > 63) start_col_byte_addr = 63;
+    if (end_col_byte_addr > 63) end_col_byte_addr = 63;
+    if (y > 127) y = 127;
+    uint8_t end_row_addr = y + height - 1;
+    if (end_row_addr > 127) end_row_addr = 127;
+    if (height == 0) { // If height is 0, nothing to draw.
+         // Or handle as error. If y > end_row_addr due to height being 0,
+         // the loop for r won't run anyway.
+        return;
+    }
+
     spi_oled_send_cmd(spi_ssd1327, 0x15);
-    spi_oled_send_cmd(spi_ssd1327, x / 2);
-    spi_oled_send_cmd(spi_ssd1327, (x + width - 1) / 2);
+    spi_oled_send_cmd(spi_ssd1327, start_col_byte_addr);
+    spi_oled_send_cmd(spi_ssd1327, end_col_byte_addr);
+
     spi_oled_send_cmd(spi_ssd1327, 0x75);
     spi_oled_send_cmd(spi_ssd1327, y);
-    spi_oled_send_cmd(spi_ssd1327, y + height - 1);
+    spi_oled_send_cmd(spi_ssd1327, end_row_addr);
 
-    for (uint8_t row = 0; row < height; ++row)
+    // Send image data row by row
+    for (uint8_t r = 0; r < height; ++r)
     {
-        spi_oled_send_data(spi_ssd1327, &image[row * (width + 1) / 2], (width + 1) / 2);
+        // Check if current row is within display bounds (y+r)
+        if (y + r > end_row_addr) break; // Stop if current row exceeds the calculated end_row_addr
+        if (image_bytes_per_row > 0) { // Only send if there's data for the row
+            spi_oled_send_data(spi_ssd1327, &image[r * image_bytes_per_row], (uint32_t)image_bytes_per_row * 8);
+        }
     }
 }
 
@@ -333,9 +360,6 @@ void spi_oled_drawAnimation(
 }
 
 /*
-// Static image 16x16
-const uint8_t smiley16x16[16][8] = {}; // Each row = 8 bytes (16 px @ 4bpp)
-
 
 // Animated: 4 frames, 32x16 px
 const uint8_t anim[4][16][16] = {

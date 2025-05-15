@@ -22,7 +22,6 @@
 #include <math.h> // Add this for sin() function
 #include <string.h>
 #include "driver/gpio.h"
-#include "ie_kaiji.h"
 #include "m_1.h"
 #include "esp_audio_enc.h"
 #include "esp_audio_enc_reg.h"
@@ -50,7 +49,8 @@
 #include "esp32-spi-ssd1327.h"
 #include <inttypes.h>
 #include "driver/spi_master.h"
-
+#include "include/images/logo.h"
+#include "include/images/test.h"
 
 #define SAMPLE_RATE 16000
 #define BIT_DEPTH 16
@@ -529,6 +529,10 @@ void oled_task(void *arg)
 
     while (1)
     {
+        spi_oled_drawImage(&spi_ssd1327, 0, 0, 128, 128, (const uint8_t *)logo);
+        printf("logo is painted\n");
+        vTaskDelay(1500 / portTICK_PERIOD_MS);
+
         spi_oled_draw_circle(&spi_ssd1327, 0, 0);
         printf("(1/4) White 16 pixel radius circle is painted\n");
         vTaskDelay(1500 / portTICK_PERIOD_MS);
@@ -537,13 +541,9 @@ void oled_task(void *arg)
         printf("(2/4) Black 128x128 square painted\n");
         vTaskDelay(500 / portTICK_PERIOD_MS);
 
-        spi_oled_draw_square(&spi_ssd1327, 0, 0, 128, 128, SSD1327_GS_15);
+        spi_oled_draw_square(&spi_ssd1327, 0, 0, 64, 64, SSD1327_GS_15);
         printf("(3/4) White 128x128 square painted\n");
-        vTaskDelay(5000 / portTICK_PERIOD_MS);
-
-        spi_oled_draw_square(&spi_ssd1327, 0, 0, 128, 128, SSD1327_GS_0);
-        printf("(4/4) Black 128x128 square painted\n");
-        vTaskDelay(500 / portTICK_PERIOD_MS);
+        vTaskDelay(1500 / portTICK_PERIOD_MS);
     }
 }
 

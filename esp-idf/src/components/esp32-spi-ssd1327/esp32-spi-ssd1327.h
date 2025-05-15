@@ -29,6 +29,11 @@ typedef enum {
     SSD1327_GS_15 = 15,
 } ssd1327_gs_t;
 
+typedef struct {
+    uint8_t width;
+    uint8_t height;
+    const uint8_t *data; // Packed [num_chars][bytes_per_char]
+} font_t;
 
 void spi_oled_init(struct spi_ssd1327 *spi_ssd1327);
 
@@ -43,3 +48,35 @@ void spi_oled_send_data(struct spi_ssd1327 *spi_ssd1327, void * data, uint32_t d
 void spi_oled_draw_square(struct spi_ssd1327 *spi_ssd1327, uint8_t x, uint8_t y, uint8_t width, uint8_t height, ssd1327_gs_t gs);
 
 void spi_oled_draw_circle(struct spi_ssd1327 *spi_ssd1327, uint8_t x, uint8_t y);
+
+// Draw a text string on the OLED using a font
+void spi_oled_drawText(
+    struct spi_ssd1327 *spi_ssd1327,
+    uint8_t x,
+    uint8_t y,
+    const font_t *font,
+    ssd1327_gs_t gs,
+    const char *text
+);
+
+// Draw a grayscale image (4bpp) on the OLED
+void spi_oled_drawImage(
+    struct spi_ssd1327 *spi_ssd1327,
+    uint8_t x,
+    uint8_t y,
+    uint8_t width,
+    uint8_t height,
+    const uint8_t *image // packed 4bpp: (width+1)/2 per row
+);
+
+// Draw one frame of a grayscale animation on the OLED
+void spi_oled_drawAnimation(
+    struct spi_ssd1327 *spi_ssd1327,
+    uint8_t x,
+    uint8_t y,
+    uint8_t w,
+    uint8_t h,
+    const uint8_t *frames[], // [frame][data]
+    uint8_t frame_count,
+    uint8_t frame_idx
+);
