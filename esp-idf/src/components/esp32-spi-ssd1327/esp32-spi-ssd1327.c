@@ -51,10 +51,10 @@ void spi_oled_init(struct spi_ssd1327 *spi_ssd1327)
      * where whatever was drawn was interlaced and spread over twice its actual
      * height is resolved by ensuring that some of these A[x] vars "in line".
      * In particular, look at A[6] */
-    spi_oled_send_cmd_arg(spi_ssd1327, 0xA0, 0x42); // 0100 0010
+    spi_oled_send_cmd_arg(spi_ssd1327, 0xA0, 0x51);
 
     /* Set Display Start Line: 0 (See datasheet p. 47) */
-    spi_oled_send_cmd_arg(spi_ssd1327, 0xA1, 0x00); // = 0
+    spi_oled_send_cmd_arg(spi_ssd1327, 0xA1, 0x7F);
 
     /* Set Display Offset: 0 (See datasheet p. 47) */
     spi_oled_send_cmd_arg(spi_ssd1327, 0xA2, 0x00); // = 0
