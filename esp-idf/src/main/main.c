@@ -128,6 +128,8 @@ static void esp_now_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t 
 bool init_esp_now()
 {
     // Initialize WiFi
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     esp_err_t ret = esp_wifi_init(&cfg);
     if (ret != ESP_OK)
