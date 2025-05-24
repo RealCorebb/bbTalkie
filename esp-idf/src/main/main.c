@@ -160,6 +160,7 @@ bool init_esp_now()
         return false;
     }
 
+
     // Register callbacks
     esp_now_register_send_cb(esp_now_send_cb);
     esp_now_register_recv_cb(esp_now_recv_cb);
@@ -176,6 +177,10 @@ bool init_esp_now()
         ESP_LOGE(TAG, "Add broadcast peer failed: %s", esp_err_to_name(ret));
         return false;
     }
+
+    ESP_ERROR_CHECK(esp_now_set_wake_window(8));
+    ESP_ERROR_CHECK(esp_wifi_connectionless_module_set_wake_interval(32));
+
 
     // Create receive queue (holds up to 10 messages)
     s_recv_queue = xQueueCreate(10, sizeof(esp_now_recv_data_t));
