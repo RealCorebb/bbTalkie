@@ -146,8 +146,8 @@ esp_err_t bsp_audio_play(const int16_t *data, int length, TickType_t ticks_to_wa
     // Also convert from 16-bit to 32-bit (shift left by 16 bits)
     for (int i = 0; i < length; i++)
     {
-        stereo_buffer[i * 2] = 0;                       // Left channel - silent
-        stereo_buffer[i * 2 + 1] = (int32_t)data[i] << 16; // Right channel - audio data shifted to 32-bit
+        stereo_buffer[i * 2] = (int32_t)data[i] << 16;  // Left channel - audio data shifted to 32-bit
+        stereo_buffer[i * 2 + 1] = 0; // Right channel - silent 
     }
 
     size_t bytes_written = 0;
@@ -173,7 +173,7 @@ int bsp_get_feed_channel(void)
 
 char *bsp_get_input_format(void)
 {
-    return "MR";
+    return "RM";
 }
 
 esp_err_t bsp_board_init(uint32_t sample_rate, int channel_format, int bits_per_chan)

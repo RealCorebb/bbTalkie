@@ -52,6 +52,9 @@
 #include "include/images/logo.h"
 #include "include/images/test.h"
 
+#include "driver/adc.h"
+#include "soc/adc_channel.h"
+
 #define SAMPLE_RATE 16000
 #define BIT_DEPTH 16
 #define ENCODED_BUF_SIZE 10240
@@ -107,6 +110,7 @@ static void esp_now_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t 
 
     // Log reception
     is_receiving = true;
+    ESP_ERROR_CHECK(esp_wifi_connectionless_module_set_wake_interval(0));
     ESP_LOGI(TAG, "Received %d bytes", data_len);
 
     // Store in queue if available
@@ -128,6 +132,8 @@ static void esp_now_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t 
 bool init_esp_now()
 {
     // Initialize WiFi
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     esp_err_t ret = esp_wifi_init(&cfg);
     if (ret != ESP_OK)
@@ -178,8 +184,8 @@ bool init_esp_now()
         return false;
     }
 
-    ESP_ERROR_CHECK(esp_now_set_wake_window(8));
-    ESP_ERROR_CHECK(esp_wifi_connectionless_module_set_wake_interval(32));
+    ESP_ERROR_CHECK(esp_now_set_wake_window(25));
+    ESP_ERROR_CHECK(esp_wifi_connectionless_module_set_wake_interval(100));
 
 
     // Create receive queue (holds up to 10 messages)
@@ -334,7 +340,8 @@ void decode_Task(void *arg)
         {
             is_receiving = false;
 
-
+            ESP_ERROR_CHECK(esp_now_set_wake_window(25));
+            ESP_ERROR_CHECK(esp_wifi_connectionless_module_set_wake_interval(100));
 
 
             const int silence_samples = 512; // Adjust this number as needed
@@ -552,6 +559,18 @@ void oled_task(void *arg)
     }
 }
 
+void batteryLevel_Task(void *pvParameters) {
+    // Configure ADC1 channel 7 (GPIO 7)
+    adc1_config_width(ADC_WIDTH_BIT_12); // 12-bit resolution
+    adc1_config_channel_atten(ADC1_GPIO7_CHANNEL, ADC_ATTEN_DB_11); // Attenuation for full range
+
+    while (1) {
+        int analog_value = adc1_get_raw(ADC1_GPIO7_CHANNEL); // Read analog value
+        ESP_LOGI(TAG, "Analog Value: %d", analog_value); // Print the value
+        vTaskDelay(pdMS_TO_TICKS(5000)); // Delay for 5 seconds
+    }
+}
+
 void app_main()
 {
 
@@ -589,19 +608,27 @@ void app_main()
     //printf afe_config->agc_init andafe_config_.agc_mode and afe_config->agc_compression_gain_db and afe_config->agc_target_level_dbfs
     printf("agc_init:%d, agc_mode:%d, agc_compression_gain_db:%d, agc_target_level_dbfs:%d\n", afe_config->agc_init, afe_config->agc_mode, afe_config->agc_compression_gain_db, afe_config->agc_target_level_dbfs);
 
-    // digitalWrite pin 5 to high
-    // set GPIO_NUM_5 to output
-    gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << GPIO_NUM_6),  // Select GPIO6
+    gpio_config_t io_conf_3 = {
+        .pin_bit_mask = (1ULL << GPIO_NUM_3),  // Select GPIO3
         .mode = GPIO_MODE_OUTPUT,              // Set as output mode
         .pull_up_en = GPIO_PULLUP_DISABLE,     // Disable pull-up
         .pull_down_en = GPIO_PULLDOWN_DISABLE, // Disable pull-down
         .intr_type = GPIO_INTR_DISABLE,        // Disable interrupt
     };
-    gpio_config(&io_conf);
+    gpio_config(&io_conf_3);
 
-    // Set GPIO6 to high
-    gpio_set_level(GPIO_NUM_6, 1);
+    gpio_config_t io_conf_9 = {
+        .pin_bit_mask = (1ULL << GPIO_NUM_9),  // Select GPIO9
+        .mode = GPIO_MODE_OUTPUT,              // Set as output mode
+        .pull_up_en = GPIO_PULLUP_DISABLE,     // Disable pull-up
+        .pull_down_en = GPIO_PULLDOWN_DISABLE, // Disable pull-down
+        .intr_type = GPIO_INTR_DISABLE,        // Disable interrupt
+    };
+    gpio_config(&io_conf_9);
+
+    // Set GPIO6 and GPIO9 to high
+    gpio_set_level(GPIO_NUM_3, 1);
+    gpio_set_level(GPIO_NUM_9, 1);
 
     init_audio_stream_buffer();
     // esp_audio_play((int16_t*)m_1, sizeof(m_1), portMAX_DELAY);
@@ -610,6 +637,7 @@ void app_main()
     //xTaskCreatePinnedToCore(play_audio_task, "music", 4 * 1024, NULL, 5, NULL, 0);
     xTaskCreatePinnedToCore(decode_Task, "decode", 4 * 1024, NULL, 5, NULL, 0);
     xTaskCreatePinnedToCore(i2s_writer_task, "i2sWriter", 4 * 1024, NULL, 5, NULL, 0);
-    xTaskCreatePinnedToCore(oled_task, "oled", 4 * 1024, NULL, 5, NULL, 0);
+    //xTaskCreatePinnedToCore(oled_task, "oled", 4 * 1024, NULL, 5, NULL, 0);
+    xTaskCreatePinnedToCore(batteryLevel_Task, "battery", 4 * 1024, NULL, 5, NULL, 0);
 
 }
