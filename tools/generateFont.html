@@ -1,260 +1,434 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Font to C Array for SSD1327 OLED</title>
-<style>
-body { font-family:sans-serif; background:#222; color:#eee; }
-h1 { font-size:1.4em; }
-label { display:inline-block; width:8em; }
-input[type=range] {width:5em;}
-#oledPreview { background:#222; border:2px solid #111; }
-textarea { width:99%; height:12em; font-family:monospace; }
-.tiny { font-size:0.7em; opacity:0.7;}
-#fontloader { width:10em; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TrueType Font to Variable Width 1-Bit Converter</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        
+        .controls {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 5px;
+        }
+        
+        .control-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        input, select, button {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        
+        button:hover {
+            background: #0056b3;
+        }
+        
+        .preview {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background: #fafafa;
+        }
+        
+        canvas {
+            border: 1px solid #ccc;
+            background: white;
+            margin: 10px 0;
+        }
+        
+        .output {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            font-size: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .file-input {
+            border: 2px dashed #ddd;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 15px;
+            cursor: pointer;
+        }
+        
+        .file-input:hover {
+            border-color: #007bff;
+        }
+        
+        .font-metrics {
+            background: #e3f2fd;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-family: monospace;
+            font-size: 12px;
+        }
+    </style>
 </head>
 <body>
-<h1>Font to C Array Converter for SSD1327 (4bpp, 16 gray) OLED</h1>
+    <div class="container">
+        <h1>Variable Width Font Converter</h1>
+        
+        <div class="controls">
+            <div class="control-group">
+                <label>Upload TrueType Font (.ttf/.otf):</label>
+                <div class="file-input" onclick="document.getElementById('fontFile').click()">
+                    <input type="file" id="fontFile" accept=".ttf,.otf" style="display: none;">
+                    <span id="fileName">Click to select font file...</span>
+                </div>
+            </div>
+            
+            <div class="control-group">
+                <label for="fontSize">Font Height (pixels):</label>
+                <input type="number" id="fontSize" value="16" min="8" max="32">
+            </div>
+            
+            <div class="control-group">
+                <label for="testText">Preview Text:</label>
+                <input type="text" id="testText" value="Hello World 123! iIlL" placeholder="Enter text to preview">
+            </div>
+            
+            <button onclick="generateFont()">Generate Font</button>
+            <button onclick="copyCode()">Copy C Code</button>
+        </div>
+        
+        <div class="preview">
+            <h3>Preview:</h3>
+            <canvas id="previewCanvas" width="700" height="120"></canvas>
+            <div id="fontInfo"></div>
+            <div id="fontMetrics" class="font-metrics"></div>
+        </div>
+        
+        <div>
+            <h3>Generated C Code:</h3>
+            <div class="output" id="output">Upload a font and click Generate to see C code...</div>
+        </div>
+    </div>
 
-<p>
-<label>Upload font:</label>
-<input type="file" id="fontloader" accept=".ttf,.otf">
-<span class="tiny">(TTF/OTF)</span><br>
-
-<label>Font size:</label>
-<input type="number" id="fontsize" value="12" min="6" max="32"> px<br>
-
-<label>Grayscale mode:</label>
-<select id="graymode">
-    <option value="1">Monochrome</option>
-    <option value="4" selected>4-bit (0-15) grayscale</option>
-</select>
-</p>
-
-<p>
-<label>Text to preview:</label>
-<input type="text" id="sampletext" value="Hello, 世界!"><br>
-<label>OLED:</label>
-<canvas id="oledPreview" width="128" height="128"></canvas>
-</p>
-<p class="tiny">Drag mouse to pan preview if text too large.</p>
-
-<button id="gen_c">Generate C Source</button>
-<br>
-<textarea id="cresult" readonly placeholder="C code output..."></textarea>
-
-<script src="https://cdn.jsdelivr.net/npm/opentype.js@latest/dist/opentype.min.js"></script>
-<script>
-const ASCII_START = 32, ASCII_END = 126; // 95 chars
-
-let currentFont = null, fontLoaded = false;
-
-// -------- Font file upload --------
-document.getElementById('fontloader').addEventListener('change', function(e){
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = function(event) {
-        try {
-            currentFont = opentype.parse(event.target.result);
-            fontLoaded = true;
-            drawPreview();
-        } catch (e) {
-            alert("Font failed to load.");
-            fontLoaded = false;
-            currentFont = null;
-        }
-    };
-    reader.readAsArrayBuffer(file);
-});
-
-// --------- UI event listeners ---------
-document.getElementById('sampletext').addEventListener('input', drawPreview);
-document.getElementById('fontsize').addEventListener('input', drawPreview);
-document.getElementById('graymode').addEventListener('change', drawPreview);
-
-// ---------- Preview rendering --------
-let previewOffsetX = 0, previewOffsetY = 0, isDragging = false, lastMouse = null;
-const oledCanvas = document.getElementById('oledPreview');
-const ctx = oledCanvas.getContext('2d');
-
-oledCanvas.addEventListener('mousedown', e => {
-    isDragging = true;
-    lastMouse = {x: e.offsetX, y: e.offsetY};
-});
-oledCanvas.addEventListener('mouseup',   _ => isDragging = false );
-oledCanvas.addEventListener('mouseleave', _ => isDragging = false );
-oledCanvas.addEventListener('mousemove',  e => {
-    if (isDragging) {
-        previewOffsetX += e.offsetX - lastMouse.x;
-        previewOffsetY += e.offsetY - lastMouse.y;
-        lastMouse = {x: e.offsetX, y: e.offsetY};
-        drawPreview();
-    }
-});
-
-function drawPreview() {
-    // Fill background
-    ctx.fillStyle = "#222";
-    ctx.fillRect(0,0,oledCanvas.width,oledCanvas.height);
-
-    if (!fontLoaded) {
-        ctx.fillStyle="#7f7";
-        ctx.font = "10px monospace";
-        ctx.fillText("Upload a TTF/OTF font", 6, 32);
-        return;
-    }
-
-    const fontSize = parseInt(document.getElementById('fontsize').value);
-    const graymode = document.getElementById('graymode').value;
-    const grayscale_levels = graymode == 1 ? 2 : 16;
-    let text = document.getElementById('sampletext').value;
-
-    // --- Render on temp canvas for grayscale sampling ---
-    // We render at double scale for better AA
-    const scale = 2;
-    let tmp = document.createElement('canvas');
-    tmp.width = oledCanvas.width*scale;
-    tmp.height= oledCanvas.height*scale;
-    let tctx = tmp.getContext('2d');
-    tctx.clearRect(0,0,tmp.width,tmp.height);
-
-    let font = currentFont, ypos = fontSize*scale;
-
-    // Draw string in black on white bg for mask
-    tctx.save();
-    tctx.fillStyle = "#fff";
-    tctx.fillRect(0,0,tmp.width,tmp.height);
-    tctx.fillStyle = "#000";
-    // Compose OpenType path, allows .draw on canvas:
-    let fontPath = font.getPath(
-        text,
-        previewOffsetX*scale+2,
-        previewOffsetY*scale + fontSize*scale,
-        fontSize*scale
-    );
-    fontPath.draw(tctx);
-    tctx.restore();
-    // Read grayscale back - convert to OLED simulation
-
-    let imgDat = tctx.getImageData(0,0,oledCanvas.width*scale,oledCanvas.height*scale);
-    let data = imgDat.data;
-
-    // Compose OLED grayscale output (simulate 4-bit 16 levels)
-    let oled = ctx.getImageData(0,0,oledCanvas.width,oledCanvas.height);
-    let od = oled.data;
-
-    for(let y=0; y<oledCanvas.height; ++y) for(let x=0; x<oledCanvas.width; ++x) {
-        let gsum = 0;
-        for(let yy=0; yy<scale; ++yy) for(let xx=0; xx<scale; ++xx) {
-            let idx = ((y*scale+yy)*tmp.width + (x*scale+xx)) * 4;
-            // Read from tmp: invert, so black char => high value
-            let lum = 255 - data[idx]; // grayscale: only red channel needed here
-            gsum += lum;
-        }
-        // average
-        let g = gsum/(scale*scale*255);
-        if (graymode == 1)         g = g > 0.5 ? 1 : 0;
-        else /*16-level*/          g = Math.round(g * 15);
-
-        // Compose RGBA for screen
-        let val = Math.round(g * 255/15);
-        if (graymode == 1) val = g ? 255 : 0;
-        let oidx = (y*oledCanvas.width + x)*4;
-        od[oidx+0] = od[oidx+1] = od[oidx+2] = val;
-        od[oidx+3] = 255;
-    }
-    ctx.putImageData(oled,0,0);
-}
-
-// ------ C code export -------
-document.getElementById('gen_c').onclick = function() {
-    if (!fontLoaded) {
-        alert("Please upload a font.");
-        return;
-    }
-    let font = currentFont;
-    let fontSize = parseInt(document.getElementById('fontsize').value);
-    let graymode = document.getElementById('graymode').value;
-    let glyph_h = fontSize;
-    let glyph_w = Math.ceil(font.getAdvanceWidth('W', fontSize));
-    // However, really should raster based on glyph bbox.
-    // For now, we use fixed width per char for simplicity.
-
-    // For each ASCII char, raster into a 2D array, collect 4bpp data.
-    let result = "// Font generated for SSD1327 OLED\n";
-    result += `// Source TTF: ${font.names.fullName.en}\n`;
-    result += `#define FONT_ASCII_START ${ASCII_START}\n`;
-    result += `#define FONT_WIDTH  ${glyph_w}\n`;
-    result += `#define FONT_HEIGHT ${glyph_h}\n`;
-    if (graymode==1)
-        result += "// Format: [char][row]: 0=bg, 1=fg\n";
-    else
-        result += "// Format: [char][row][col/2]: 4bpp: high nibble=left px, low nibble=right px\n";
-
-    result += "const uint8_t font_table[][" + glyph_h +
-        "][" + Math.ceil(glyph_w/2) + "] = {\n";
-
-    // One temp canvas per char
-    for (let ch=ASCII_START; ch<=ASCII_END; ++ch) {
-        // temp
-        let tc = document.createElement('canvas');
-        tc.width = glyph_w;
-        tc.height= glyph_h;
-        let tctx = tc.getContext('2d');
-        tctx.clearRect(0,0,tc.width,tc.height);
-        // White bg, black char
-        tctx.fillStyle = "#fff";
-        tctx.fillRect(0,0,tc.width,tc.height);
-        tctx.fillStyle="#000";
-        tctx.textBaseline='top';
-        let glyph = font.charToGlyph(String.fromCharCode(ch));
-        // Centering
-        let xoff = 0, yoff = 0;
-        // Use OpenType.js to get correct x offset (bearing)
-        let xShift = -glyph.getMetrics().leftSideBearing/1000*font.unitsPerEm*fontSize/ font.unitsPerEm;
-        // Hack: if glyph not fit, use 0
-
-        glyph.draw(tctx, xoff + xShift, yoff, fontSize);
-
-        // Extract grayscale to 4-bit image
-        let im = tctx.getImageData(0,0,glyph_w,glyph_h);
-        let d = im.data;
-        result += "  { // '" + (String.fromCharCode(ch)=="'"?"\\'":String.fromCharCode(ch)) + "'\n";
-        for (let row=0; row<glyph_h; ++row) {
-            result += "    {";
-            for (let col=0; col<glyph_w; col+=2) {
-                // For each pair of pixels, pack to nibble
-                let p1i = (row*glyph_w + col) * 4;
-                let p2i = (row*glyph_w + col + 1) * 4;
-                // Luminance: 0 = bg(white), 1 = fg(black).
-                let lum1 = 255-d[p1i];     // black pixel = 255
-                let g1 = (graymode==1) ? (lum1>128?1:0) : Math.round(15*lum1/255);
-                let g2 = 0;
-                if (col+1<glyph_w) {
-                    let lum2 = 255-d[p2i];
-                    g2 = (graymode==1) ? (lum2>128?1:0) : Math.round(15*lum2/255);
-                }
-                let packed = (g1<<4) | g2;
-                result+="0x"+packed.toString(16).padStart(2,'0');
-                if (col+2<glyph_w) result+=",";
+    <script>
+        let fontBuffer = null;
+        let fontFace = null;
+        
+        document.getElementById('fontFile').addEventListener('change', handleFontUpload);
+        
+        async function handleFontUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            document.getElementById('fileName').textContent = file.name;
+            
+            fontBuffer = await file.arrayBuffer();
+            
+            // Create FontFace and load it
+            try {
+                fontFace = new FontFace('CustomFont', fontBuffer);
+                await fontFace.load();
+                document.fonts.add(fontFace);
+                
+                // Auto-generate preview
+                setTimeout(generateFont, 100);
+            } catch (error) {
+                alert('Error loading font: ' + error.message);
             }
-            result += "}";
-            if (row+1<glyph_h) result+=",";
-            result += "\n";
         }
-        result += "  }";
-        if (ch<ASCII_END) result += ",";
-        result += "\n";
-    }
-    result += "};\n";
-    result += `// font_table[char][row][col/2], for '${String.fromCharCode(ASCII_START)}'..'${String.fromCharCode(ASCII_END)}'\n`;
-
-    document.getElementById('cresult').value = result;
-}
-drawPreview(); // initial
-
-</script>
+        
+        function generateFont() {
+            if (!fontFace) {
+                alert('Please upload a font file first');
+                return;
+            }
+            
+            const fontSize = parseInt(document.getElementById('fontSize').value);
+            const testText = document.getElementById('testText').value;
+            
+            // Generate font data for ASCII 32-126
+            const fontData = {};
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Set larger canvas for accurate measurement
+            canvas.width = fontSize * 4;
+            canvas.height = fontSize * 2;
+            
+            ctx.font = `${fontSize}px CustomFont`;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            
+            let totalBytes = 0;
+            let minWidth = fontSize;
+            let maxWidth = 0;
+            
+            // Generate data for printable ASCII characters
+            for (let i = 32; i <= 126; i++) {
+                const char = String.fromCharCode(i);
+                
+                // Measure character width using Canvas API
+                const metrics = ctx.measureText(char);
+                let charWidth = Math.ceil(metrics.width);
+                
+                // Ensure minimum width of 1 pixel
+                if (charWidth < 1) charWidth = 1;
+                
+                // Clear canvas
+                ctx.fillStyle = 'white';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Draw character
+                ctx.fillStyle = 'black';
+                ctx.fillText(char, 1, 1);
+                
+                // Get image data and convert to 1-bit
+                const imageData = ctx.getImageData(0, 0, charWidth + 2, fontSize);
+                const pixels = [];
+                
+                // Convert to 1-bit bitmap data
+                for (let y = 0; y < fontSize; y++) {
+                    const bytesPerRow = Math.ceil(charWidth / 8);
+                    const rowBytes = [];
+                    
+                    for (let byteIdx = 0; byteIdx < bytesPerRow; byteIdx++) {
+                        let byte = 0;
+                        for (let bit = 0; bit < 8; bit++) {
+                            const x = byteIdx * 8 + bit;
+                            if (x < charWidth) {
+                                const pixelIdx = (y * (charWidth + 2) + x + 1) * 4;
+                                const brightness = (imageData.data[pixelIdx] + 
+                                                 imageData.data[pixelIdx + 1] + 
+                                                 imageData.data[pixelIdx + 2]) / 3;
+                                if (brightness < 128) {
+                                    byte |= (1 << (7 - bit));
+                                }
+                            }
+                        }
+                        rowBytes.push(byte);
+                    }
+                    pixels.push(...rowBytes);
+                }
+                
+                fontData[char] = {
+                    width: charWidth,
+                    data: pixels,
+                    bytesPerRow: Math.ceil(charWidth / 8)
+                };
+                
+                totalBytes += pixels.length;
+                minWidth = Math.min(minWidth, charWidth);
+                maxWidth = Math.max(maxWidth, charWidth);
+            }
+            
+            // Generate preview
+            generatePreview(testText, fontData, fontSize);
+            
+            // Update font metrics
+            document.getElementById('fontMetrics').innerHTML = `
+Character Width Range: ${minWidth} - ${maxWidth} pixels
+Total Memory Usage: ${totalBytes} bytes
+Average Width: ${(totalBytes / (95 * fontSize)).toFixed(1)} bytes per char
+            `;
+            
+            // Generate C code
+            generateCCode(fontData, fontSize, totalBytes);
+        }
+        
+        function generatePreview(text, fontData, fontSize) {
+            const canvas = document.getElementById('previewCanvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Clear canvas
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw grid
+            ctx.strokeStyle = '#f0f0f0';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < canvas.width; i += 10) {
+                ctx.beginPath();
+                ctx.moveTo(i, 0);
+                ctx.lineTo(i, canvas.height);
+                ctx.stroke();
+            }
+            
+            // Draw preview text
+            let x = 10;
+            const y = 20;
+            const pixelSize = 2;
+            
+            for (let char of text) {
+                if (fontData[char]) {
+                    const charData = fontData[char];
+                    const charWidth = charData.width;
+                    const bytesPerRow = charData.bytesPerRow;
+                    
+                    // Draw character pixel by pixel
+                    for (let row = 0; row < fontSize; row++) {
+                        for (let byteIdx = 0; byteIdx < bytesPerRow; byteIdx++) {
+                            const byte = charData.data[row * bytesPerRow + byteIdx];
+                            for (let bit = 0; bit < 8; bit++) {
+                                const pixelX = byteIdx * 8 + bit;
+                                if (pixelX < charWidth && (byte & (1 << (7 - bit)))) {
+                                    ctx.fillStyle = 'black';
+                                    ctx.fillRect(x + pixelX * pixelSize, y + row * pixelSize, pixelSize, pixelSize);
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Draw character boundary
+                    ctx.strokeStyle = '#007bff';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(x, y, charWidth * pixelSize, fontSize * pixelSize);
+                    
+                    // Add character label
+                    ctx.fillStyle = '#666';
+                    ctx.font = '10px Arial';
+                    ctx.fillText(`${char}(${charWidth})`, x, y + fontSize * pixelSize + 12);
+                    
+                    x += charWidth * pixelSize + 4;
+                }
+            }
+            
+            // Update font info
+            const avgWidth = Object.values(fontData).reduce((sum, char) => sum + char.width, 0) / 95;
+            document.getElementById('fontInfo').innerHTML = `
+                Font Height: ${fontSize} pixels<br>
+                Variable Width: Yes (avg: ${avgWidth.toFixed(1)} pixels)<br>
+                Characters: 95 (ASCII 32-126)
+            `;
+        }
+        
+        function generateCCode(fontData, fontSize, totalBytes) {
+            let code = `// Generated variable-width 1-bit font data\n`;
+            code += `// Font height: ${fontSize} pixels, variable width\n`;
+            code += `// ASCII characters 32-126\n`;
+            code += `// Total size: ${totalBytes} bytes\n\n`;
+            
+            // Generate width table
+            code += `// Character width table\n`;
+            code += `const uint8_t font_${fontSize}_widths[95] = {\n`;
+            for (let i = 32; i <= 126; i++) {
+                const char = String.fromCharCode(i);
+                const width = fontData[char].width;
+                code += `    ${width}`;
+                if (i < 126) code += ',';
+                code += ` // '${char}' (${i})\n`;
+            }
+            code += `};\n\n`;
+            
+            // Generate character data offsets
+            code += `// Character data offsets\n`;
+            code += `const uint16_t font_${fontSize}_offsets[95] = {\n`;
+            let offset = 0;
+            for (let i = 32; i <= 126; i++) {
+                const char = String.fromCharCode(i);
+                code += `    ${offset}`;
+                if (i < 126) code += ',';
+                code += ` // '${char}' (${i})\n`;
+                offset += fontData[char].data.length;
+            }
+            code += `};\n\n`;
+            
+            // Generate bitmap data
+            code += `// Bitmap data\n`;
+            code += `const uint8_t font_${fontSize}_data[${totalBytes}] = {\n`;
+            
+            let dataIndex = 0;
+            for (let i = 32; i <= 126; i++) {
+                const char = String.fromCharCode(i);
+                const charData = fontData[char];
+                
+                code += `    // '${char}' (${char.charCodeAt(0)}) - ${charData.width}x${fontSize} pixels\n`;
+                
+                for (let j = 0; j < charData.data.length; j++) {
+                    if (j % 8 === 0) code += `    `;
+                    code += `0x${charData.data[j].toString(16).padStart(2, '0').toUpperCase()}`;
+                    if (dataIndex < totalBytes - 1) code += ',';
+                    if (j % 8 === 7 || j === charData.data.length - 1) code += `\n`;
+                    dataIndex++;
+                }
+            }
+            code += `};\n\n`;
+            
+            // Generate font structure
+            code += `// Font structure\n`;
+            code += `typedef struct {\n`;
+            code += `    uint8_t height;\n`;
+            code += `    const uint8_t *widths;\n`;
+            code += `    const uint16_t *offsets;\n`;
+            code += `    const uint8_t *data;\n`;
+            code += `} variable_font_t;\n\n`;
+            
+            code += `const variable_font_t font_${fontSize} = {\n`;
+            code += `    .height = ${fontSize},\n`;
+            code += `    .widths = font_${fontSize}_widths,\n`;
+            code += `    .offsets = font_${fontSize}_offsets,\n`;
+            code += `    .data = font_${fontSize}_data\n`;
+            code += `};\n\n`;
+        
+            
+            document.getElementById('output').textContent = code;
+        }
+        
+        function copyCode() {
+            const output = document.getElementById('output');
+            const text = output.textContent;
+            
+            navigator.clipboard.writeText(text).then(() => {
+                alert('C code copied to clipboard!');
+            }).catch(() => {
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                alert('C code copied to clipboard!');
+            });
+        }
+    </script>
 </body>
 </html>

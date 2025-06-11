@@ -50,7 +50,8 @@
 #include <inttypes.h>
 #include "driver/spi_master.h"
 #include "include/images/logo.h"
-#include "include/images/test.h"
+
+#include "include/fonts/fusion_pixel.h"
 
 #include "driver/adc.h"
 #include "soc/adc_channel.h"
@@ -91,6 +92,12 @@ static led_strip_handle_t led_strip;
 #define BUTTON_ACTIVE_LEVEL     0   // Active low (pressed = 0)
 #define LONG_PRESS_TIME_MS      2000 // 2 seconds for long press
 
+const variable_font_t font_10 = {
+    .height = 10,
+    .widths = font_10_widths,
+    .offsets = font_10_offsets,
+    .data = font_10_data
+};
 
 static esp_afe_sr_iface_t *afe_handle = NULL;
 StreamBufferHandle_t play_stream_buf;
@@ -554,25 +561,13 @@ void oled_task(void *arg)
     printf("screen is on\n");
 
     vTaskDelay(1000 / portTICK_PERIOD_MS);
-    spi_oled_draw_square(&spi_ssd1327, 0, 0, 128, 128, SSD1327_GS_0);
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-
+    spi_oled_drawImage(&spi_ssd1327, 0, 0, 128, 128, (const uint8_t *)logo);
+    printf("logo is painted\n");
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    spi_oled_drawText(&spi_ssd1327, 0, 0, &font_10, SSD1327_GS_6, "bbTalkie");
+    spi_oled_drawText(&spi_ssd1327, 50, 0, &font_10, SSD1327_GS_15, "bbTalkie");
     while (1)
     {
-        spi_oled_drawImage(&spi_ssd1327, 0, 0, 128, 128, (const uint8_t *)logo);
-        printf("logo is painted\n");
-        vTaskDelay(1500 / portTICK_PERIOD_MS);
-
-        spi_oled_draw_circle(&spi_ssd1327, 0, 0);
-        printf("(1/4) White 16 pixel radius circle is painted\n");
-        vTaskDelay(1500 / portTICK_PERIOD_MS);
-
-        spi_oled_draw_square(&spi_ssd1327, 0, 0, 128, 128, SSD1327_GS_0);
-        printf("(2/4) Black 128x128 square painted\n");
-        vTaskDelay(500 / portTICK_PERIOD_MS);
-
-        spi_oled_draw_square(&spi_ssd1327, 0, 0, 64, 64, SSD1327_GS_15);
-        printf("(3/4) White 128x128 square painted\n");
         vTaskDelay(1500 / portTICK_PERIOD_MS);
     }
 }

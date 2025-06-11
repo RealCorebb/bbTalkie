@@ -296,40 +296,56 @@ font_t font8x8 = {
 void spi_oled_drawText(
     struct spi_ssd1327 *spi_ssd1327,
     uint8_t x, uint8_t y,
-    const font_t *font,
-    ssd1327_gs_t gs, // Grayscale (0–15)
+    const variable_font_t *font,
+    ssd1327_gs_t gs,
     const char *text)
 {
-    while (*text)
-    {
+    while (*text) {
         char c = *text++;
-        // ASCII 32..126 supported
-        if (c < 32 || c > 126)
-            continue;
-        uint16_t offset = (c - 32) * font->height;
-
+        if (c < 32 || c > 126) continue;
+        
+        uint8_t char_idx = c - 32;
+        uint8_t char_width = font->widths[char_idx];
+        uint16_t data_offset = font->offsets[char_idx];
+        uint8_t bytes_per_row = (char_width + 7) / 8;
+        
         // Render each row of the character
-        for (uint8_t row = 0; row < font->height; ++row)
-        {
-            spi_oled_send_cmd(spi_ssd1327, 0x15); // Set col
-            spi_oled_send_cmd(spi_ssd1327, (x) / 2);
-            spi_oled_send_cmd(spi_ssd1327, (x + font->width - 1) / 2);
-            spi_oled_send_cmd(spi_ssd1327, 0x75); // Set row
+        for (uint8_t row = 0; row < font->height; ++row) {
+            // Set column address window
+            spi_oled_send_cmd(spi_ssd1327, 0x15);
+            spi_oled_send_cmd(spi_ssd1327, x / 2);
+            spi_oled_send_cmd(spi_ssd1327, (x + char_width - 1) / 2);
+            
+            // Set row address window
+            spi_oled_send_cmd(spi_ssd1327, 0x75);
             spi_oled_send_cmd(spi_ssd1327, y + row);
             spi_oled_send_cmd(spi_ssd1327, y + row);
-
-            // Compose pixel data for row
-            uint8_t byte = font->data[offset + row];
-            uint8_t rowdata[(font->width + 1) / 2];
-            for (int i = 0; i < font->width; i += 2)
-            {
-                uint8_t p1 = (byte & (1 << (7 - i))) ? gs : 0;
-                uint8_t p2 = (i + 1 < font->width) && (byte & (1 << (7 - (i + 1)))) ? gs : 0;
-                rowdata[i / 2] = (p1 << 4) | p2;
+            
+            // Convert 1-bit to 4-bit grayscale data
+            uint8_t rowdata[(char_width + 1) / 2];
+            
+            for (uint8_t col = 0; col < char_width; col += 2) {
+                uint8_t byte_idx = col / 8;
+                uint8_t bit_idx = col % 8;
+                uint8_t font_byte = font->data[data_offset + row * bytes_per_row + byte_idx];
+                
+                uint8_t p1 = (font_byte & (1 << (7 - bit_idx))) ? gs : 0;
+                uint8_t p2 = 0;
+                
+                if (col + 1 < char_width) {
+                    uint8_t byte_idx2 = (col + 1) / 8;
+                    uint8_t bit_idx2 = (col + 1) % 8;
+                    uint8_t font_byte2 = font->data[data_offset + row * bytes_per_row + byte_idx2];
+                    p2 = (font_byte2 & (1 << (7 - bit_idx2))) ? gs : 0;
+                }
+                
+                rowdata[col / 2] = (p1 << 4) | p2;
             }
-            spi_oled_send_data(spi_ssd1327, rowdata, (font->width + 1) / 2);
+            
+            spi_oled_send_data(spi_ssd1327, rowdata, ((char_width + 1) / 2) * 8);
         }
-        x += font->width;
+        
+        x += char_width + 1; // Add 1 pixel spacing between characters
     }
 }
 

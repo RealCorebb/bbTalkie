@@ -30,10 +30,11 @@ typedef enum {
 } ssd1327_gs_t;
 
 typedef struct {
-    uint8_t width;
     uint8_t height;
-    const uint8_t *data; // Packed [num_chars][bytes_per_char]
-} font_t;
+    const uint8_t *widths;
+    const uint16_t *offsets;
+    const uint8_t *data;
+} variable_font_t;
 
 void spi_oled_init(struct spi_ssd1327 *spi_ssd1327);
 
@@ -56,7 +57,7 @@ void spi_oled_drawText(
     struct spi_ssd1327 *spi_ssd1327,
     uint8_t x,
     uint8_t y,
-    const font_t *font,
+    const variable_font_t *font,
     ssd1327_gs_t gs,
     const char *text
 );
