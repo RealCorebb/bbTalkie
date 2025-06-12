@@ -112,6 +112,7 @@ struct spi_ssd1327 spi_ssd1327 = {
     .rst_pin_num = RST_PIN_NUM,
     .spi_handle = &oled_dev_handle,
 };
+SemaphoreHandle_t spi_mutex;
 
 // Structure to hold received data
 typedef struct
@@ -522,19 +523,25 @@ static void animation_task(void *pvParameters) {
         // Calculate frame data offset
         const uint8_t *frame_data = anim->animation_data + 
             (current_frame * anim->height * bytes_per_row);
-        
+
+        // Lock SPI access
+        xSemaphoreTake(spi_mutex, portMAX_DELAY);
+
         // Draw current frame
         spi_oled_drawImage(anim->spi_ssd1327, 
-                          anim->x, anim->y, 
-                          anim->width, anim->height, 
-                          frame_data);
-        
+                        anim->x, anim->y, 
+                        anim->width, anim->height, 
+                        frame_data);
+
+        // Release SPI access
+        xSemaphoreGive(spi_mutex);
+
         // Move to next frame
         current_frame++;
         if (current_frame >= anim->frame_count) {
-            current_frame = 0;  // Always loop back to first frame
+            current_frame = 0;
         }
-        
+
         vTaskDelay(pdMS_TO_TICKS(anim->frame_delay_ms));
     }
     
@@ -545,7 +552,7 @@ static void animation_task(void *pvParameters) {
 void oled_task(void *arg)
 {
     // This task is responsible for handling the OLED display
-
+    spi_mutex = xSemaphoreCreateMutex();
     spi_bus_config_t spi_bus_cfg = {
         .miso_io_num = -1,
         .mosi_io_num = SPI_MOSI_PIN_NUM,
@@ -605,11 +612,25 @@ void oled_task(void *arg)
     anim->height = 41;
     anim->frame_count = 14;
     anim->animation_data = (const uint8_t*)idle_single;
-    anim->frame_delay_ms = 1000 / 15;
+    anim->frame_delay_ms = 1000 / 5;
     
     // Create task
     xTaskCreate(animation_task, "idleSingleAnim", 2048, anim, 5, &anim->task_handle);
 
+
+    spi_oled_animation_t *anim_idleBar = malloc(sizeof(spi_oled_animation_t));
+    // Initialize parameters
+    anim_idleBar->spi_ssd1327 = &spi_ssd1327;
+    anim_idleBar->x = 10;
+    anim_idleBar->y = 90;
+    anim_idleBar->width = 101;
+    anim_idleBar->height = 12;
+    anim_idleBar->frame_count = 14;
+    anim_idleBar->animation_data = (const uint8_t*)idle_bar;
+    anim_idleBar->frame_delay_ms = 1000 / 15;
+    
+    // Create task
+    xTaskCreate(animation_task, "idleBarAnim", 2048, anim_idleBar, 5, &anim_idleBar->task_handle);
 
     while (1)
     {
