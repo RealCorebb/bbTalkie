@@ -72,22 +72,11 @@ void spi_oled_drawImage(
     const uint8_t *image // packed 4bpp: (width+1)/2 per row
 );
 
-// Draw one frame of a grayscale animation on the OLED
-void spi_oled_drawAnimation(
-    struct spi_ssd1327 *spi_ssd1327,
-    uint8_t x,
-    uint8_t y,
-    uint8_t w,
-    uint8_t h,
-    const uint8_t *frames[], // [frame][data]
-    uint8_t frame_count,
-    uint8_t frame_idx);
-
-typedef struct
-{
-    struct spi_ssd1327 *display;
-    uint8_t x, y, w, h;
-    const uint8_t **frames;
+typedef struct {
+    struct spi_ssd1327 *spi_ssd1327;
+    uint8_t x, y, width, height;
     uint8_t frame_count;
+    const uint8_t *animation_data;
     uint32_t frame_delay_ms;
-} animation_task_args_t;
+    TaskHandle_t task_handle;
+} spi_oled_animation_t;

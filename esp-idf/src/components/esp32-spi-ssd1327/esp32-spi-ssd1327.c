@@ -7,6 +7,9 @@
 
 #include "esp32-spi-ssd1327.h"
 
+#define MAX_DISPLAY_WIDTH_PX 128
+#define MAX_ROW_DATA_BYTES (MAX_DISPLAY_WIDTH_PX / 2) // Each byte holds 2 pixels
+
 uint8_t whitecircle16[128] = {0x00, 0x00, 0x0f, 0xff, 0xff, 0xf0, 0x00, 0x00,
                               0x00, 0x0f, 0xff, 0xff, 0xff, 0xff, 0xf0, 0x00,
                               0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00,
@@ -516,20 +519,6 @@ void spi_oled_drawImage(
         }
     }
 }
-
-// Animation: assumes all frames same w/h
-void spi_oled_drawAnimation(
-    struct spi_ssd1327 *spi_ssd1327,
-    uint8_t x, uint8_t y,
-    uint8_t w, uint8_t h,
-    const uint8_t *frames[], // [frame][data]
-    uint8_t frame_count,
-    uint8_t frame_idx)
-{
-    if (frame_idx < frame_count)
-        spi_oled_drawImage(spi_ssd1327, x, y, w, h, frames[frame_idx]);
-}
-
 /*
 
 // Animated: 4 frames, 32x16 px

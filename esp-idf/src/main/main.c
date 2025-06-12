@@ -53,6 +53,7 @@
 #include "include/images/battery.h"
 #include "include/images/mic.h"
 #include "include/images/volume.h"
+#include "include/images/idle.h"
 
 #include "include/fonts/fusion_pixel.h"
 
@@ -511,24 +512,34 @@ void init_audio_stream_buffer()
     assert(play_stream_buf);
 }
 
-void animation_task(void *arg)
-{
-    animation_task_args_t *args = (animation_task_args_t *)arg;
-    uint8_t frame_idx = 0;
-
-    while (1)
-    {
-        spi_oled_drawAnimation(
-            args->display,
-            args->x, args->y,
-            args->w, args->h,
-            args->frames,
-            args->frame_count,
-            frame_idx);
-
-        frame_idx = (frame_idx + 1) % args->frame_count;
-        vTaskDelay(args->frame_delay_ms / portTICK_PERIOD_MS);
+// Animation task function
+static void animation_task(void *pvParameters) {
+    spi_oled_animation_t *anim = (spi_oled_animation_t *)pvParameters;
+    uint8_t current_frame = 0;
+    uint8_t bytes_per_row = (anim->width + 1) / 2;  // 4bpp packing
+    
+    while (1) {
+        // Calculate frame data offset
+        const uint8_t *frame_data = anim->animation_data + 
+            (current_frame * anim->height * bytes_per_row);
+        
+        // Draw current frame
+        spi_oled_drawImage(anim->spi_ssd1327, 
+                          anim->x, anim->y, 
+                          anim->width, anim->height, 
+                          frame_data);
+        
+        // Move to next frame
+        current_frame++;
+        if (current_frame >= anim->frame_count) {
+            current_frame = 0;  // Always loop back to first frame
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(anim->frame_delay_ms));
     }
+    
+    // Task runs forever in loop - no cleanup needed
+    vTaskDelete(NULL);
 }
 
 void oled_task(void *arg)
@@ -584,18 +595,21 @@ void oled_task(void *arg)
     spi_oled_drawImage(&spi_ssd1327, 6, 0, 9, 10, (const uint8_t *)volume_on);
     spi_oled_drawImage(&spi_ssd1327, 112, 0, 16, 10, (const uint8_t *)battery_4);
 
-    static animation_task_args_t idle_single_args = {
-        .display = &spi_ssd1327,
-        .x = 10,
-        .y = 30,
-        .w = 54,
-        .h = 41,
-        .frames = idle_single,
-        .frame_count = 14,
-        .frame_delay_ms = 66};
+    spi_oled_animation_t *anim = malloc(sizeof(spi_oled_animation_t));
 
-    TaskHandle_t idleSingleHandle = NULL;
-    xTaskCreate(animation_task, "idleSingleAnim", 2048, &idle_single_args, 5, &idleSingleHandle);
+    // Initialize parameters
+    anim->spi_ssd1327 = &spi_ssd1327;
+    anim->x = 10;
+    anim->y = 30;
+    anim->width = 54;
+    anim->height = 41;
+    anim->frame_count = 14;
+    anim->animation_data = (const uint8_t*)idle_single;
+    anim->frame_delay_ms = 1000 / 15;
+    
+    // Create task
+    xTaskCreate(animation_task, "idleSingleAnim", 2048, anim, 5, &anim->task_handle);
+
 
     while (1)
     {
