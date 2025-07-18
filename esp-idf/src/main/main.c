@@ -53,7 +53,7 @@
 #include "include/images/battery.h"
 #include "include/images/mic.h"
 #include "include/images/volume.h"
-#include "include/images/idle.h"
+#include "include/images/home.h"
 
 #include "include/fonts/fusion_pixel.h"
 
@@ -72,8 +72,6 @@
 #define PLAY_RING_BUFFER_SIZE 8192
 #define PLAY_CHUNK_SIZE 2048
 #define ESP_NOW_PACKET_SIZE 512
-#define SERVER_IP "192.168.68.87" // Your PC's IP address
-#define SERVER_PORT 8765          // Port to communicate on
 
 #define SPI_MOSI_PIN_NUM 14
 #define SPI_SCK_PIN_NUM 13
@@ -105,6 +103,10 @@ StreamBufferHandle_t play_stream_buf;
 static QueueHandle_t s_recv_queue = NULL;
 static uint8_t broadcast_mac[ESP_NOW_ETH_ALEN] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}; // Broadcast MAC address (all ones)
 volatile bool is_receiving = false;
+volatile bool is_speaking = false;
+bool is_command = false;
+int state = 0; // 0: idle, 1: speaking, 2: receiving, 3: command
+int lastState = -1;
 static const char *TAG = "bbTalkie";
 spi_device_handle_t oled_dev_handle;
 struct spi_ssd1327 spi_ssd1327 = {
@@ -423,7 +425,7 @@ void detect_Task(void *arg)
         // save speech data
         if (res->vad_state != VAD_SILENCE && !is_receiving)
         {
-
+            is_speaking = true;
             // Define a buffer for g711 output
             size_t g711_len = 0;
 
@@ -462,6 +464,10 @@ void detect_Task(void *arg)
                     send_data_esp_now(g711_output, g711_len);
                 }
             }
+        }
+        else
+        {
+            is_speaking = false;
         }
     }
     if (buff)
@@ -514,39 +520,50 @@ void init_audio_stream_buffer()
 }
 
 // Animation task function
-static void animation_task(void *pvParameters) {
+static void animation_task(void *pvParameters)
+{
     spi_oled_animation_t *anim = (spi_oled_animation_t *)pvParameters;
     uint8_t current_frame = 0;
-    uint8_t bytes_per_row = (anim->width + 1) / 2;  // 4bpp packing
-    
-    while (1) {
+    uint8_t bytes_per_row = (anim->width + 1) / 2; // 4bpp packing
+
+    while (1)
+    {
         // Calculate frame data offset
-        const uint8_t *frame_data = anim->animation_data + 
-            (current_frame * anim->height * bytes_per_row);
+        const uint8_t *frame_data = anim->animation_data +
+                                    (current_frame * anim->height * bytes_per_row);
 
         // Lock SPI access
         xSemaphoreTake(spi_mutex, portMAX_DELAY);
 
         // Draw current frame
-        spi_oled_drawImage(anim->spi_ssd1327, 
-                        anim->x, anim->y, 
-                        anim->width, anim->height, 
-                        frame_data);
+        spi_oled_drawImage(anim->spi_ssd1327,
+                           anim->x, anim->y,
+                           anim->width, anim->height,
+                           frame_data);
 
         // Release SPI access
         xSemaphoreGive(spi_mutex);
 
         // Move to next frame
         current_frame++;
-        if (current_frame >= anim->frame_count) {
+        if (current_frame >= anim->frame_count)
+        {
             current_frame = 0;
         }
 
         vTaskDelay(pdMS_TO_TICKS(anim->frame_delay_ms));
     }
-    
+
     // Task runs forever in loop - no cleanup needed
     vTaskDelete(NULL);
+}
+
+void draw_status()
+{
+    spi_oled_drawText(&spi_ssd1327, 44, 0, &font_10, SSD1327_GS_6, "bbTalkie");
+    spi_oled_drawImage(&spi_ssd1327, 0, 0, 5, 10, (const uint8_t *)mic_high);
+    spi_oled_drawImage(&spi_ssd1327, 6, 0, 9, 10, (const uint8_t *)volume_on);
+    spi_oled_drawImage(&spi_ssd1327, 112, 0, 16, 10, (const uint8_t *)battery_4);
 }
 
 void oled_task(void *arg)
@@ -597,10 +614,7 @@ void oled_task(void *arg)
     printf("logo is painted\n");
     vTaskDelay(1000 / portTICK_PERIOD_MS);
     spi_oled_draw_square(&spi_ssd1327, 0, 0, 128, 128, SSD1327_GS_0);
-    spi_oled_drawText(&spi_ssd1327, 44, 0, &font_10, SSD1327_GS_6, "bbTalkie");
-    spi_oled_drawImage(&spi_ssd1327, 0, 0, 5, 10, (const uint8_t *)mic_high);
-    spi_oled_drawImage(&spi_ssd1327, 6, 0, 9, 10, (const uint8_t *)volume_on);
-    spi_oled_drawImage(&spi_ssd1327, 112, 0, 16, 10, (const uint8_t *)battery_4);
+    draw_status();
 
     spi_oled_animation_t *anim = malloc(sizeof(spi_oled_animation_t));
 
@@ -611,12 +625,8 @@ void oled_task(void *arg)
     anim->width = 54;
     anim->height = 41;
     anim->frame_count = 14;
-    anim->animation_data = (const uint8_t*)idle_single;
+    anim->animation_data = (const uint8_t *)idle_single;
     anim->frame_delay_ms = 1000 / 5;
-    
-    // Create task
-    xTaskCreate(animation_task, "idleSingleAnim", 2048, anim, 5, &anim->task_handle);
-
 
     spi_oled_animation_t *anim_idleBar = malloc(sizeof(spi_oled_animation_t));
     // Initialize parameters
@@ -626,15 +636,77 @@ void oled_task(void *arg)
     anim_idleBar->width = 101;
     anim_idleBar->height = 12;
     anim_idleBar->frame_count = 14;
-    anim_idleBar->animation_data = (const uint8_t*)idle_bar;
+    anim_idleBar->animation_data = (const uint8_t *)idle_bar;
     anim_idleBar->frame_delay_ms = 1000 / 15;
-    
-    // Create task
-    xTaskCreate(animation_task, "idleBarAnim", 2048, anim_idleBar, 5, &anim_idleBar->task_handle);
+
+    spi_oled_animation_t *anim_waveBar = malloc(sizeof(spi_oled_animation_t));
+    // Initialize parameters
+    anim_waveBar->spi_ssd1327 = &spi_ssd1327;
+    anim_waveBar->x = 10;
+    anim_waveBar->y = 90;
+    anim_waveBar->width = 100;
+    anim_waveBar->height = 32;
+    anim_waveBar->frame_count = 30;
+    anim_waveBar->animation_data = (const uint8_t *)wave_bar;
+    anim_waveBar->frame_delay_ms = 1000 / 30;
+
+    draw_status();
 
     while (1)
     {
         vTaskDelay(1500 / portTICK_PERIOD_MS);
+        if (is_command)
+        {
+            state = 3;
+        }
+        else if (is_receiving)
+        {
+            state = 2; // Receiving
+        }
+        else if (is_speaking)
+        {
+            state = 1; // Speaking
+        }
+        else
+        {
+            state = 0; // Idle
+        }
+        if (state != lastState)
+        {
+            lastState = state;
+            switch (state)
+            {
+            case 0: // Idle
+                if (anim_waveBar->task_handle != NULL)
+                {
+                    vTaskDelete(anim_waveBar->task_handle);
+                    anim_waveBar->task_handle = NULL;
+                }
+                xTaskCreate(animation_task, "idleSingleAnim", 2048, anim, 5, &anim->task_handle);
+                xTaskCreate(animation_task, "idleBarAnim", 2048, anim_idleBar, 5, &anim_idleBar->task_handle);
+                break;
+            case 1: // Speaking
+                // stop idleBarAnim
+                if (anim_idleBar->task_handle != NULL)
+                {
+                    vTaskDelete(anim_idleBar->task_handle);
+                    anim_idleBar->task_handle = NULL;
+                }
+                xTaskCreate(animation_task, "waveBarAnim", 2048, anim_waveBar, 5, &anim_waveBar->task_handle);
+                break;
+            case 2: // Receiving
+                break;
+            case 3: // Command
+                // stop idleBarAnim
+                if (anim_idleBar->task_handle != NULL)
+                {
+                    vTaskDelete(anim_idleBar->task_handle);
+                    anim_idleBar->task_handle = NULL;
+                }
+                spi_oled_draw_square(&spi_ssd1327, 0, 16, 128, 112, SSD1327_GS_0);
+                break;
+            }
+        }
     }
 }
 
