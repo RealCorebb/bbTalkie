@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lottie to Spritesheet Converter</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .upload-area {
+            border: 2px dashed #ccc;
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 20px;
+            transition: border-color 0.3s;
+        }
+        
+        .upload-area:hover {
+            border-color: #007bff;
+        }
+        
+        .upload-area.dragover {
+            border-color: #007bff;
+            background-color: #f8f9fa;
+        }
+        
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .control-group {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        label {
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        input, button {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        
+        button:hover {
+            background-color: #0056b3;
+        }
+        
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        
+        .preview-container {
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        .progress {
+            width: 100%;
+            height: 20px;
+            background-color: #e9ecef;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        
+        .progress-bar {
+            height: 100%;
+            background-color: #007bff;
+            transition: width 0.3s;
+            width: 0%;
+        }
+        
+        .result {
+            margin-top: 20px;
+            text-align: center;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        #lottieContainer {
+            max-width: 300px;
+            margin: 0 auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎬 Lottie to Spritesheet Converter</h1>
+        
+        <div class="upload-area" id="uploadArea">
+            <p>📁 Drag & drop a Lottie JSON file here or click to browse</p>
+            <input type="file" id="fileInput" accept=".json" style="display: none;">
+        </div>
+        
+        <div class="controls">
+            <div class="control-group">
+                <label for="widthInput">Width (px):</label>
+                <input type="number" id="widthInput" value="256" min="32" max="2048">
+            </div>
+            <div class="control-group">
+                <label for="fpsInput">FPS:</label>
+                <input type="number" id="fpsInput" value="30" min="1" max="60">
+            </div>
+        </div>
+        
+        <button id="convertBtn" disabled>🔄 Convert to Spritesheet</button>
+        
+        <div class="preview-container">
+            <div id="lottieContainer" class="hidden"></div>
+            <div id="progressContainer" class="hidden">
+                <p>Converting frames...</p>
+                <div class="progress">
+                    <div class="progress-bar" id="progressBar"></div>
+                </div>
+                <span id="progressText">0%</span>
+            </div>
+        </div>
+        
+        <div class="result hidden" id="result">
+            <h3>✅ Conversion Complete!</h3>
+            <canvas id="spritesheetCanvas" style="max-width: 100%; border: 1px solid #ddd;"></canvas>
+            <br><br>
+            <a id="downloadLink" download="spritesheet.png">
+                <button>💾 Download Spritesheet</button>
+            </a>
+            <div id="spritesheetInfo" style="margin-top: 10px; font-size: 14px; color: #666;"></div>
+        </div>
+    </div>
+
+    <script>
+        let lottieAnimation = null;
+        let animationData = null;
+
+        // File upload handling
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const convertBtn = document.getElementById('convertBtn');
+        const lottieContainer = document.getElementById('lottieContainer');
+
+        uploadArea.addEventListener('click', () => fileInput.click());
+        uploadArea.addEventListener('dragover', handleDragOver);
+        uploadArea.addEventListener('drop', handleDrop);
+        fileInput.addEventListener('change', handleFileSelect);
+        convertBtn.addEventListener('click', convertToSpritesheet);
+
+        function handleDragOver(e) {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        }
+
+        function handleFileSelect(e) {
+            const file = e.target.files[0];
+            if (file) {
+                handleFile(file);
+            }
+        }
+
+        function handleFile(file) {
+            if (!file.name.endsWith('.json')) {
+                alert('Please select a JSON file');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    animationData = JSON.parse(e.target.result);
+                    loadLottiePreview();
+                    convertBtn.disabled = false;
+                } catch (error) {
+                    alert('Invalid JSON file');
+                    console.error('Error parsing JSON:', error);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function loadLottiePreview() {
+            // Clear previous animation
+            if (lottieAnimation) {
+                lottieAnimation.destroy();
+            }
+
+            lottieContainer.innerHTML = '';
+            lottieContainer.classList.remove('hidden');
+
+            // Load Lottie animation for preview
+            lottieAnimation = lottie.loadAnimation({
+                container: lottieContainer,
+                renderer: 'svg',
+                loop: true,
+                autoplay: true,
+                animationData: animationData
+            });
+        }
+
+        async function convertToSpritesheet() {
+            const width = parseInt(document.getElementById('widthInput').value);
+            const fps = parseInt(document.getElementById('fpsInput').value);
+            
+            if (!animationData) {
+                alert('Please upload a Lottie file first');
+                return;
+            }
+
+            convertBtn.disabled = true;
+            document.getElementById('progressContainer').classList.remove('hidden');
+            document.getElementById('result').classList.add('hidden');
+
+            try {
+                await generateSpritesheet(animationData, width, fps);
+            } catch (error) {
+                alert('Error converting animation: ' + error.message);
+                console.error('Conversion error:', error);
+            } finally {
+                convertBtn.disabled = false;
+                document.getElementById('progressContainer').classList.add('hidden');
+            }
+        }
+
+        async function generateSpritesheet(animData, targetWidth, fps) {
+            // Calculate dimensions
+            const originalWidth = animData.w;
+            const originalHeight = animData.h;
+            const aspectRatio = originalHeight / originalWidth;
+            const frameWidth = targetWidth;
+            const frameHeight = Math.round(targetWidth * aspectRatio);
+            
+            // Calculate animation details
+            const totalFrames = animData.op - animData.ip;
+            const animFps = animData.fr;
+            const duration = totalFrames / animFps;
+            const frameCount = Math.ceil(duration * fps);
+            
+            // Create temporary canvas for rendering individual frames
+            const canvas = document.createElement('canvas');
+            canvas.width = frameWidth;
+            canvas.height = frameHeight;
+            const ctx = canvas.getContext('2d');
+            
+            // Create container for Lottie animation
+            const tempContainer = document.createElement('div');
+            tempContainer.style.width = frameWidth + 'px';
+            tempContainer.style.height = frameHeight + 'px';
+            tempContainer.style.position = 'absolute';
+            tempContainer.style.left = '-9999px';
+            document.body.appendChild(tempContainer);
+            
+            // Load animation
+            const anim = lottie.loadAnimation({
+                container: tempContainer,
+                renderer: 'svg',
+                loop: false,
+                autoplay: false,
+                animationData: animData
+            });
+            
+            await new Promise(resolve => {
+                anim.addEventListener('DOMLoaded', resolve);
+            });
+            
+            const frames = [];
+            
+            // Capture frames
+            for (let i = 0; i < frameCount; i++) {
+                const progress = i / (frameCount - 1);
+                const frame = progress * totalFrames;
+                
+                anim.goToAndStop(frame, true);
+                
+                // Wait a bit for rendering
+                await new Promise(resolve => setTimeout(resolve, 50));
+                
+                // Convert SVG to canvas
+                const svgElement = tempContainer.querySelector('svg');
+                if (svgElement) {
+                    const svgData = new XMLSerializer().serializeToString(svgElement);
+                    const img = new Image();
+                    
+                    await new Promise((resolve, reject) => {
+                        img.onload = () => {
+                            ctx.clearRect(0, 0, frameWidth, frameHeight);
+                            ctx.drawImage(img, 0, 0, frameWidth, frameHeight);
+                            
+                            // Create frame image data
+                            const frameCanvas = document.createElement('canvas');
+                            frameCanvas.width = frameWidth;
+                            frameCanvas.height = frameHeight;
+                            const frameCtx = frameCanvas.getContext('2d');
+                            frameCtx.drawImage(canvas, 0, 0);
+                            
+                            frames.push(frameCanvas);
+                            resolve();
+                        };
+                        img.onerror = reject;
+                        img.src = 'data:image/svg+xml;base64,' + btoa(svgData);
+                    });
+                }
+                
+                // Update progress
+                const progressPercent = Math.round((i + 1) / frameCount * 100);
+                document.getElementById('progressBar').style.width = progressPercent + '%';
+                document.getElementById('progressText').textContent = progressPercent + '%';
+            }
+            
+            // Clean up
+            anim.destroy();
+            document.body.removeChild(tempContainer);
+            
+            // Create spritesheet
+            createSpritesheet(frames, frameWidth, frameHeight, frameCount, fps);
+        }
+        
+        function createSpritesheet(frames, frameWidth, frameHeight, frameCount, fps) {
+            // Calculate spritesheet dimensions
+            const cols = Math.ceil(Math.sqrt(frameCount));
+            const rows = Math.ceil(frameCount / cols);
+            const spritesheetWidth = cols * frameWidth;
+            const spritesheetHeight = rows * frameHeight;
+            
+            // Create spritesheet canvas
+            const spritesheetCanvas = document.getElementById('spritesheetCanvas');
+            spritesheetCanvas.width = spritesheetWidth;
+            spritesheetCanvas.height = spritesheetHeight;
+            const ctx = spritesheetCanvas.getContext('2d');
+            
+            // Draw frames onto spritesheet
+            frames.forEach((frame, index) => {
+                const col = index % cols;
+                const row = Math.floor(index / cols);
+                const x = col * frameWidth;
+                const y = row * frameHeight;
+                
+                ctx.drawImage(frame, x, y);
+            });
+            
+            // Create download link
+            spritesheetCanvas.toBlob(blob => {
+                const url = URL.createObjectURL(blob);
+                const downloadLink = document.getElementById('downloadLink');
+                downloadLink.href = url;
+                downloadLink.download = `spritesheet_${frameWidth}x${frameHeight}_${fps}fps.png`;
+            });
+            
+            // Show result
+            document.getElementById('result').classList.remove('hidden');
+            
+            // Show spritesheet info
+            const info = document.getElementById('spritesheetInfo');
+            info.innerHTML = `
+                <strong>Spritesheet Info:</strong><br>
+                Total Size: ${spritesheetWidth}×${spritesheetHeight}px<br>
+                Frame Size: ${frameWidth}×${frameHeight}px<br>
+                Frames: ${frameCount}<br>
+                Grid: ${cols}×${rows}<br>
+                FPS: ${fps}
+            `;
+        }
+    </script>
+</body>
+</html>
