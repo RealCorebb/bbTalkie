@@ -222,48 +222,163 @@ void spi_oled_draw_square(struct spi_ssd1327 *spi_ssd1327, uint8_t x,
     /* }}} */
 }
 
-// Helper structure to pass context to helper functions
-typedef struct {
-    uint8_t *buffer;
-    uint16_t buffer_width;
-    uint16_t buffer_height;
-    uint16_t buffer_bytes_per_row;
-    int16_t min_x;
-    int16_t min_y;
-} render_context_t;
-
-// Helper function to set a pixel in the buffer
-static void set_pixel(render_context_t *ctx, int16_t px, int16_t py, ssd1327_gs_t value)
+void spi_oled_draw_circle(struct spi_ssd1327 *spi_ssd1327, uint8_t x,
+                          uint8_t y)
 {
-    if (px < 0 || py < 0 || px >= ctx->buffer_width || py >= ctx->buffer_height)
-        return;
 
-    uint16_t byte_idx = py * ctx->buffer_bytes_per_row + px / 2;
-    uint8_t pixel_pos = px % 2;
+    /* {{{ */
+    /* Function: Set Column Address (Tell device we are about to set the
+     * column bounds for an upcoming write). (See datasheet p. 36) */
+    spi_oled_send_cmd(spi_ssd1327, 0x15);
+    /* Set the column start address */
+    spi_oled_send_cmd(spi_ssd1327, ((x + 1) / 2));
+    /* Set the column end address */
+    spi_oled_send_cmd(spi_ssd1327, ((x + 1) / 2) + (16 / 2) - 1);
 
-    if (pixel_pos == 0)
-    { // 左像素（高4位）
-        uint8_t current_right = ctx->buffer[byte_idx] & 0x0F;
-        uint8_t new_left = (ctx->buffer[byte_idx] >> 4) | value; // 使用OR来合并
-        if (new_left > 15)
-            new_left = 15; // 防止溢出
-        ctx->buffer[byte_idx] = (new_left << 4) | current_right;
+    /* Function: Set Row Address (Tell device we are about to set the
+     * row bounds for an upcoming write) (See datasheet p. 36) */
+    spi_oled_send_cmd(spi_ssd1327, 0x75);
+    /* Set the row start address */
+    spi_oled_send_cmd(spi_ssd1327, y);
+    /* Set the row end address */
+    spi_oled_send_cmd(spi_ssd1327, y + 16 - 1);
+
+    /* Draw the 16 pixel diameter circle */
+    /* 8 bits per array element * 16 rows * (16 columns / 2 pixels per column) */
+    spi_oled_send_data(spi_ssd1327, &whitecircle16[0], 8 * 16 * (16 / 2));
+    /* }}} */
+}
+
+// Initialize frame buffer
+ssd1327_framebuffer_t *spi_oled_framebuffer_create(void)
+{
+    ssd1327_framebuffer_t *fb = malloc(sizeof(ssd1327_framebuffer_t));
+    if (!fb)
+        return NULL;
+
+    fb->width = 128;
+    fb->height = 128;
+    fb->bytes_per_row = 64; // 128 pixels / 2 pixels per byte
+
+    fb->buffer = calloc(fb->height * fb->bytes_per_row, sizeof(uint8_t));
+    if (!fb->buffer)
+    {
+        free(fb);
+        return NULL;
     }
-    else
-    { // 右像素（低4位）
-        uint8_t current_left = ctx->buffer[byte_idx] & 0xF0;
-        uint8_t new_right = (ctx->buffer[byte_idx] & 0x0F) | value; // 使用OR来合并
-        if (new_right > 15)
-            new_right = 15; // 防止溢出
-        ctx->buffer[byte_idx] = current_left | new_right;
+
+    return fb;
+}
+
+void spi_oled_framebuffer_destroy(ssd1327_framebuffer_t *fb)
+{
+    if (fb)
+    {
+        if (fb->buffer)
+            free(fb->buffer);
+        free(fb);
     }
 }
 
-// Helper function to render text
-static void render_text(render_context_t *ctx, const variable_font_t *font, 
-                       const char *text, int16_t text_x, int16_t text_y, ssd1327_gs_t color)
+// Clear frame buffer
+void spi_oled_framebuffer_clear(ssd1327_framebuffer_t *fb, ssd1327_gs_t gs)
 {
-    uint16_t char_x = text_x;
+    if (!fb || !fb->buffer)
+        return;
+
+    uint8_t fill_value = (gs << 4) | gs;
+    memset(fb->buffer, fill_value, fb->height * fb->bytes_per_row);
+}
+
+// Set a pixel in the frame buffer
+void spi_oled_framebuffer_set_pixel(ssd1327_framebuffer_t *fb, uint8_t x, uint8_t y, ssd1327_gs_t gs)
+{
+    if (!fb || !fb->buffer || x >= fb->width || y >= fb->height)
+        return;
+
+    uint16_t byte_idx = y * fb->bytes_per_row + x / 2;
+    uint8_t pixel_pos = x % 2;
+
+    if (pixel_pos == 0)
+    {
+        // Left pixel (high 4 bits)
+        fb->buffer[byte_idx] = (fb->buffer[byte_idx] & 0x0F) | (gs << 4);
+    }
+    else
+    {
+        // Right pixel (low 4 bits)
+        fb->buffer[byte_idx] = (fb->buffer[byte_idx] & 0xF0) | gs;
+    }
+}
+
+// Draw background image to frame buffer
+void spi_oled_framebuffer_draw_image(ssd1327_framebuffer_t *fb,
+                                     uint8_t x, uint8_t y,
+                                     uint8_t width, uint8_t height,
+                                     const uint8_t *image)
+{
+    if (!fb || !fb->buffer || !image)
+        return;
+
+    uint8_t img_bytes_per_row = (width + 1) / 2;
+
+    for (uint8_t row = 0; row < height; ++row)
+    {
+        if (y + row >= fb->height)
+            break;
+
+        uint16_t fb_row_start = (y + row) * fb->bytes_per_row;
+        uint16_t img_row_start = row * img_bytes_per_row;
+
+        // Handle pixel-aligned copying
+        if (x % 2 == 0)
+        {
+            // Aligned case - direct copy
+            uint8_t bytes_to_copy = img_bytes_per_row;
+            if (x / 2 + bytes_to_copy > fb->bytes_per_row)
+            {
+                bytes_to_copy = fb->bytes_per_row - x / 2;
+            }
+
+            memcpy(&fb->buffer[fb_row_start + x / 2],
+                   &image[img_row_start],
+                   bytes_to_copy);
+        }
+        else
+        {
+            // Unaligned case - need to shift pixels
+            for (uint8_t col = 0; col < width && x + col < fb->width; ++col)
+            {
+                uint8_t img_byte_idx = col / 2;
+                uint8_t img_pixel_pos = col % 2;
+                ssd1327_gs_t pixel_value;
+
+                if (img_pixel_pos == 0)
+                {
+                    pixel_value = (image[img_row_start + img_byte_idx] >> 4) & 0x0F;
+                }
+                else
+                {
+                    pixel_value = image[img_row_start + img_byte_idx] & 0x0F;
+                }
+
+                spi_oled_framebuffer_set_pixel(fb, x + col, y + row, pixel_value);
+            }
+        }
+    }
+}
+
+// Draw text to frame buffer (transparent background)
+void spi_oled_framebuffer_draw_text(ssd1327_framebuffer_t *fb,
+                                    uint8_t x, uint8_t y,
+                                    const variable_font_t *font,
+                                    ssd1327_gs_t gs,
+                                    const char *text)
+{
+    if (!fb || !fb->buffer || !text || !*text || !font)
+        return;
+
+    uint16_t char_x = x;
     const char *str = text;
 
     while (*str)
@@ -277,27 +392,101 @@ static void render_text(render_context_t *ctx, const variable_font_t *font,
         uint16_t data_offset = font->offsets[char_idx];
         uint8_t bytes_per_row = (char_width + 7) / 8;
 
-        // 渲染字符的每一行
+        // Render character
         for (uint8_t row = 0; row < font->height; ++row)
         {
+            if (y + row >= fb->height)
+                break;
+
             for (uint8_t col = 0; col < char_width; ++col)
             {
+                if (char_x + col >= fb->width)
+                    break;
+
                 uint8_t byte_idx = col / 8;
                 uint8_t bit_idx = col % 8;
                 uint8_t font_byte = font->data[data_offset + row * bytes_per_row + byte_idx];
 
                 if (font_byte & (1 << (7 - bit_idx)))
                 {
-                    int16_t px = char_x + col - ctx->min_x;
-                    int16_t py = text_y + row - ctx->min_y;
-                    set_pixel(ctx, px, py, color);
+                    spi_oled_framebuffer_set_pixel(fb, char_x + col, y + row, gs);
                 }
             }
         }
 
-        char_x += char_width + 1; // 字符间距
+        char_x += char_width + 1; // Character spacing
     }
 }
+
+// Update entire display from frame buffer
+void spi_oled_framebuffer_update_display(struct spi_ssd1327 *spi_ssd1327,
+                                         ssd1327_framebuffer_t *fb)
+{
+    if (!spi_ssd1327 || !fb || !fb->buffer)
+        return;
+
+    // Set full display window
+    spi_oled_send_cmd(spi_ssd1327, 0x15);
+    spi_oled_send_cmd(spi_ssd1327, 0x00); // Start column
+    spi_oled_send_cmd(spi_ssd1327, 0x3F); // End column (63)
+
+    spi_oled_send_cmd(spi_ssd1327, 0x75);
+    spi_oled_send_cmd(spi_ssd1327, 0x00); // Start row
+    spi_oled_send_cmd(spi_ssd1327, 0x7F); // End row (127)
+
+    // Send entire frame buffer
+    spi_oled_send_data(spi_ssd1327, fb->buffer, fb->height * fb->bytes_per_row * 8);
+}
+
+// Update partial display region from frame buffer
+void spi_oled_framebuffer_update_region(struct spi_ssd1327 *spi_ssd1327,
+                                        ssd1327_framebuffer_t *fb,
+                                        uint8_t x, uint8_t y,
+                                        uint8_t width, uint8_t height)
+{
+    if (!spi_ssd1327 || !fb || !fb->buffer)
+        return;
+
+    uint8_t start_col = x / 2;
+    uint8_t end_col = (x + width - 1) / 2;
+    uint8_t bytes_per_update_row = end_col - start_col + 1;
+
+    spi_oled_send_cmd(spi_ssd1327, 0x15);
+    spi_oled_send_cmd(spi_ssd1327, start_col);
+    spi_oled_send_cmd(spi_ssd1327, end_col);
+
+    spi_oled_send_cmd(spi_ssd1327, 0x75);
+    spi_oled_send_cmd(spi_ssd1327, y);
+    spi_oled_send_cmd(spi_ssd1327, y + height - 1);
+
+    // Send region data row by row
+    for (uint8_t row = 0; row < height; ++row)
+    {
+        if (y + row >= fb->height)
+            break;
+
+        uint16_t fb_offset = (y + row) * fb->bytes_per_row + start_col;
+        spi_oled_send_data(spi_ssd1327, &fb->buffer[fb_offset], bytes_per_update_row * 8);
+    }
+}
+
+// Usage example:
+/*
+// Initialize frame buffer
+ssd1327_framebuffer_t *fb = spi_oled_framebuffer_create();
+
+// Draw background image
+spi_oled_framebuffer_draw_image(fb, 0, 0, 128, 128, background_data);
+
+// Draw text on top (with transparent background)
+spi_oled_framebuffer_draw_text(fb, 10, 20, &my_font, 15, "Hello World!");
+
+// Update display
+spi_oled_framebuffer_update_display(&my_spi_ssd1327, fb);
+
+// Clean up
+spi_oled_framebuffer_destroy(fb);
+*/
 
 void spi_oled_drawTextWithShadow(
     struct spi_ssd1327 *spi_ssd1327,
