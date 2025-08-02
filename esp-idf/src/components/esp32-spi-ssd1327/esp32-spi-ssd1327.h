@@ -37,15 +37,6 @@ typedef struct
     const uint8_t *data;
 } variable_font_t;
 
-// Frame buffer structure
-typedef struct
-{
-    uint8_t *buffer;        // 128x128 display = 64x128 bytes (4bpp)
-    uint16_t width;         // 128 pixels
-    uint16_t height;        // 128 pixels
-    uint16_t bytes_per_row; // 64 bytes per row
-} ssd1327_framebuffer_t;
-
 void spi_oled_init(struct spi_ssd1327 *spi_ssd1327);
 
 void spi_oled_deinit(struct spi_ssd1327 *spi_ssd1327);

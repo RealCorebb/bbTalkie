@@ -165,7 +165,7 @@ static void esp_now_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t 
 
     if (data_len == PING_MAGIC_LEN && memcmp(data, PING_MAGIC, PING_MAGIC_LEN) == 0) // PING MSG
     {
-        int64_t now = esp_timer_get_time() / 1000; // ms
+/*         int64_t now = esp_timer_get_time() / 1000; // ms
         bool found = false;
 
         for (int i = 0; i < MAX_MAC_TRACK; ++i)
@@ -193,7 +193,7 @@ static void esp_now_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t 
                     break;
                 }
             }
-        }
+        } */
     }
     // CMD: prefix handling
     else if (data_len >= 4 && memcmp(data, "CMD:", 4) == 0)
@@ -691,7 +691,6 @@ void oled_task(void *arg)
     };
     gpio_config(&io_conf2);
 
-    ssd1327_framebuffer_t *fb = spi_oled_framebuffer_create();
     spi_oled_init(&spi_ssd1327);
 
     printf("screen is on\n");
@@ -714,6 +713,7 @@ void oled_task(void *arg)
     anim->frame_count = 14;
     anim->animation_data = (const uint8_t *)idle_single;
     anim->frame_delay_ms = 1000 / 5;
+    anim->task_handle = NULL;
 
     spi_oled_animation_t *anim_idleBar = malloc(sizeof(spi_oled_animation_t));
     // Initialize parameters
@@ -725,6 +725,7 @@ void oled_task(void *arg)
     anim_idleBar->frame_count = 14;
     anim_idleBar->animation_data = (const uint8_t *)idle_bar;
     anim_idleBar->frame_delay_ms = 1000 / 15;
+    anim_idleBar->task_handle = NULL;
 
     spi_oled_animation_t *anim_waveBar = malloc(sizeof(spi_oled_animation_t));
     // Initialize parameters
@@ -736,6 +737,7 @@ void oled_task(void *arg)
     anim_waveBar->frame_count = 30;
     anim_waveBar->animation_data = (const uint8_t *)wave_bar;
     anim_waveBar->frame_delay_ms = 1000 / 30;
+    anim_waveBar->task_handle = NULL;
 
     draw_status();
 
@@ -769,8 +771,14 @@ void oled_task(void *arg)
                     vTaskDelete(anim_waveBar->task_handle);
                     anim_waveBar->task_handle = NULL;
                 }
+                if (anim->task_handle != NULL)
+                {
+                    vTaskDelete(anim->task_handle);
+                    anim->task_handle = NULL;
+                }
                 xTaskCreate(animation_task, "idleSingleAnim", 2048, anim, 5, &anim->task_handle);
                 xTaskCreate(animation_task, "idleBarAnim", 2048, anim_idleBar, 5, &anim_idleBar->task_handle);
+                printf("Idle job create\n");
                 break;
             case 1: // Speaking
                 // stop idleBarAnim
