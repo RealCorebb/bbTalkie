@@ -597,7 +597,7 @@ void oled_task(void *arg)
     printf("logo is painted\n");
     vTaskDelay(1000 / portTICK_PERIOD_MS);
     spi_oled_draw_square(&spi_ssd1327, 0, 0, 128, 128, SSD1327_GS_0);
-    spi_oled_drawText(&spi_ssd1327, 44, 0, &font_10, SSD1327_GS_6, "bbTalkie");
+    spi_oled_drawTextWithShadow(&spi_ssd1327, 44, 0, &font_10, SSD1327_GS_8, SSD1327_GS_2,-1,0, "bbTalkie");
     spi_oled_drawImage(&spi_ssd1327, 0, 0, 5, 10, (const uint8_t *)mic_high);
     spi_oled_drawImage(&spi_ssd1327, 6, 0, 9, 10, (const uint8_t *)volume_on);
     spi_oled_drawImage(&spi_ssd1327, 112, 0, 16, 10, (const uint8_t *)battery_4);

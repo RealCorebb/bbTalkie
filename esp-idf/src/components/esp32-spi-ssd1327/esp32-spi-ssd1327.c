@@ -222,42 +222,82 @@ void spi_oled_draw_square(struct spi_ssd1327 *spi_ssd1327, uint8_t x,
     /* }}} */
 }
 
-void spi_oled_draw_circle(struct spi_ssd1327 *spi_ssd1327, uint8_t x,
-                          uint8_t y)
+// Helper structure to pass context to helper functions
+typedef struct {
+    uint8_t *buffer;
+    uint16_t buffer_width;
+    uint16_t buffer_height;
+    uint16_t buffer_bytes_per_row;
+    int16_t min_x;
+    int16_t min_y;
+} render_context_t;
+
+// Helper function to set a pixel in the buffer
+static void set_pixel(render_context_t *ctx, int16_t px, int16_t py, ssd1327_gs_t value)
 {
+    if (px < 0 || py < 0 || px >= ctx->buffer_width || py >= ctx->buffer_height)
+        return;
 
-    /* {{{ */
-    /* Function: Set Column Address (Tell device we are about to set the
-     * column bounds for an upcoming write). (See datasheet p. 36) */
-    spi_oled_send_cmd(spi_ssd1327, 0x15);
-    /* Set the column start address */
-    spi_oled_send_cmd(spi_ssd1327, ((x + 1) / 2));
-    /* Set the column end address */
-    spi_oled_send_cmd(spi_ssd1327, ((x + 1) / 2) + (16 / 2) - 1);
+    uint16_t byte_idx = py * ctx->buffer_bytes_per_row + px / 2;
+    uint8_t pixel_pos = px % 2;
 
-    /* Function: Set Row Address (Tell device we are about to set the
-     * row bounds for an upcoming write) (See datasheet p. 36) */
-    spi_oled_send_cmd(spi_ssd1327, 0x75);
-    /* Set the row start address */
-    spi_oled_send_cmd(spi_ssd1327, y);
-    /* Set the row end address */
-    spi_oled_send_cmd(spi_ssd1327, y + 16 - 1);
-
-    /* Draw the 16 pixel diameter circle */
-    /* 8 bits per array element * 16 rows * (16 columns / 2 pixels per column) */
-    spi_oled_send_data(spi_ssd1327, &whitecircle16[0], 8 * 16 * (16 / 2));
-    /* }}} */
+    if (pixel_pos == 0)
+    { // 左像素（高4位）
+        uint8_t current_right = ctx->buffer[byte_idx] & 0x0F;
+        uint8_t new_left = (ctx->buffer[byte_idx] >> 4) | value; // 使用OR来合并
+        if (new_left > 15)
+            new_left = 15; // 防止溢出
+        ctx->buffer[byte_idx] = (new_left << 4) | current_right;
+    }
+    else
+    { // 右像素（低4位）
+        uint8_t current_left = ctx->buffer[byte_idx] & 0xF0;
+        uint8_t new_right = (ctx->buffer[byte_idx] & 0x0F) | value; // 使用OR来合并
+        if (new_right > 15)
+            new_right = 15; // 防止溢出
+        ctx->buffer[byte_idx] = current_left | new_right;
+    }
 }
 
-/*
-const uint8_t font8x8_basic[95][8] = { };
+// Helper function to render text
+static void render_text(render_context_t *ctx, const variable_font_t *font, 
+                       const char *text, int16_t text_x, int16_t text_y, ssd1327_gs_t color)
+{
+    uint16_t char_x = text_x;
+    const char *str = text;
 
-font_t font8x8 = {
-    .width = 8,
-    .height = 8,
-    .data = (const uint8_t *)font8x8_basic,
-};
-*/
+    while (*str)
+    {
+        char c = *str++;
+        if (c < 32 || c > 126)
+            continue;
+
+        uint8_t char_idx = c - 32;
+        uint8_t char_width = font->widths[char_idx];
+        uint16_t data_offset = font->offsets[char_idx];
+        uint8_t bytes_per_row = (char_width + 7) / 8;
+
+        // 渲染字符的每一行
+        for (uint8_t row = 0; row < font->height; ++row)
+        {
+            for (uint8_t col = 0; col < char_width; ++col)
+            {
+                uint8_t byte_idx = col / 8;
+                uint8_t bit_idx = col % 8;
+                uint8_t font_byte = font->data[data_offset + row * bytes_per_row + byte_idx];
+
+                if (font_byte & (1 << (7 - bit_idx)))
+                {
+                    int16_t px = char_x + col - ctx->min_x;
+                    int16_t py = text_y + row - ctx->min_y;
+                    set_pixel(ctx, px, py, color);
+                }
+            }
+        }
+
+        char_x += char_width + 1; // 字符间距
+    }
+}
 
 void spi_oled_drawTextWithShadow(
     struct spi_ssd1327 *spi_ssd1327,
@@ -302,80 +342,24 @@ void spi_oled_drawTextWithShadow(
     if (!buffer)
         return;
 
-    // 设置像素的辅助函数
-    auto set_pixel = [&](int16_t px, int16_t py, ssd1327_gs_t value)
-    {
-        if (px < 0 || py < 0 || px >= buffer_width || py >= buffer_height)
-            return;
-
-        uint16_t byte_idx = py * buffer_bytes_per_row + px / 2;
-        uint8_t pixel_pos = px % 2;
-
-        if (pixel_pos == 0)
-        { // 左像素（高4位）
-            uint8_t current_right = buffer[byte_idx] & 0x0F;
-            uint8_t new_left = (buffer[byte_idx] >> 4) | value; // 使用OR来合并
-            if (new_left > 15)
-                new_left = 15; // 防止溢出
-            buffer[byte_idx] = (new_left << 4) | current_right;
-        }
-        else
-        { // 右像素（低4位）
-            uint8_t current_left = buffer[byte_idx] & 0xF0;
-            uint8_t new_right = (buffer[byte_idx] & 0x0F) | value; // 使用OR来合并
-            if (new_right > 15)
-                new_right = 15; // 防止溢出
-            buffer[byte_idx] = current_left | new_right;
-        }
-    };
-
-    // 渲染文本的辅助函数
-    auto render_text = [&](int16_t text_x, int16_t text_y, ssd1327_gs_t color)
-    {
-        uint16_t char_x = text_x;
-        const char *str = text;
-
-        while (*str)
-        {
-            char c = *str++;
-            if (c < 32 || c > 126)
-                continue;
-
-            uint8_t char_idx = c - 32;
-            uint8_t char_width = font->widths[char_idx];
-            uint16_t data_offset = font->offsets[char_idx];
-            uint8_t bytes_per_row = (char_width + 7) / 8;
-
-            // 渲染字符的每一行
-            for (uint8_t row = 0; row < font->height; ++row)
-            {
-                for (uint8_t col = 0; col < char_width; ++col)
-                {
-                    uint8_t byte_idx = col / 8;
-                    uint8_t bit_idx = col % 8;
-                    uint8_t font_byte = font->data[data_offset + row * bytes_per_row + byte_idx];
-
-                    if (font_byte & (1 << (7 - bit_idx)))
-                    {
-                        int16_t px = char_x + col - min_x;
-                        int16_t py = text_y + row - min_y;
-                        set_pixel(px, py, color);
-                    }
-                }
-            }
-
-            char_x += char_width + 1; // 字符间距
-        }
+    // 设置渲染上下文
+    render_context_t ctx = {
+        .buffer = buffer,
+        .buffer_width = buffer_width,
+        .buffer_height = buffer_height,
+        .buffer_bytes_per_row = buffer_bytes_per_row,
+        .min_x = min_x,
+        .min_y = min_y
     };
 
     // 先渲染阴影（如果阴影灰度值大于0）
     if (gs_shadow > 0)
     {
-        render_text(offset_x, offset_y, gs_shadow);
+        render_text(&ctx, font, text, offset_x, offset_y, gs_shadow);
     }
 
     // 再渲染主文本
-    render_text(0, 0, gs);
+    render_text(&ctx, font, text, 0, 0, gs);
 
     // 计算在显示器上的实际绘制位置和尺寸
     int16_t draw_x = x + min_x;
