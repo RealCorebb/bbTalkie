@@ -4,7 +4,7 @@
 // Display dimensions
 #define SSD1327_WIDTH 128
 #define SSD1327_HEIGHT 128
-#define SSD1327_BUFFER_SIZE ((SSD1327_WIDTH * SSD1327_HEIGHT) / 2)  // 4bpp = 0.5 bytes per pixel
+#define SSD1327_BUFFER_SIZE ((SSD1327_WIDTH * SSD1327_HEIGHT) / 2) // 4bpp = 0.5 bytes per pixel
 #define MAX_BITS_PER_TRANSFER 4096
 
 struct spi_ssd1327
@@ -12,8 +12,8 @@ struct spi_ssd1327
     uint8_t dc_pin_num;
     uint8_t rst_pin_num;
     spi_device_handle_t *spi_handle;
-    uint8_t *framebuffer;  // Frame buffer for 4bpp grayscale (8192 bytes)
-    bool auto_refresh;     // Auto refresh display after drawing operations
+    uint8_t *framebuffer; // Frame buffer for 4bpp grayscale (8192 bytes)
+    bool auto_refresh;    // Auto refresh display after drawing operations
 };
 
 typedef enum
@@ -57,35 +57,35 @@ bool spi_oled_framebuffer_init(struct spi_ssd1327 *spi_ssd1327);
 void spi_oled_framebuffer_free(struct spi_ssd1327 *spi_ssd1327);
 void spi_oled_framebuffer_clear(struct spi_ssd1327 *spi_ssd1327, ssd1327_gs_t color);
 void spi_oled_framebuffer_refresh(struct spi_ssd1327 *spi_ssd1327);
-void spi_oled_framebuffer_refresh_region(struct spi_ssd1327 *spi_ssd1327, 
-                                       uint8_t x, uint8_t y, 
-                                       uint8_t width, uint8_t height);
+void spi_oled_framebuffer_refresh_region(struct spi_ssd1327 *spi_ssd1327,
+                                         uint8_t x, uint8_t y,
+                                         uint8_t width, uint8_t height);
 
 // Drawing functions (all operate on frame buffer)
 void spi_oled_set_pixel(struct spi_ssd1327 *spi_ssd1327, uint8_t x, uint8_t y, ssd1327_gs_t gs);
 ssd1327_gs_t spi_oled_get_pixel(struct spi_ssd1327 *spi_ssd1327, uint8_t x, uint8_t y);
-void spi_oled_clear_region(struct spi_ssd1327 *spi_ssd1327, uint8_t x, uint8_t y, 
-                         uint8_t width, uint8_t height);
-void spi_oled_draw_square(struct spi_ssd1327 *spi_ssd1327, uint8_t x, uint8_t y, 
-                         uint8_t width, uint8_t height, ssd1327_gs_t gs);
-void spi_oled_draw_circle(struct spi_ssd1327 *spi_ssd1327, uint8_t x, uint8_t y, 
-                         uint8_t radius, ssd1327_gs_t gs);
-void spi_oled_draw_line(struct spi_ssd1327 *spi_ssd1327, uint8_t x0, uint8_t y0, 
-                       uint8_t x1, uint8_t y1, ssd1327_gs_t gs);
+void spi_oled_clear_region(struct spi_ssd1327 *spi_ssd1327, uint8_t x, uint8_t y,
+                           uint8_t width, uint8_t height);
+void spi_oled_draw_square(struct spi_ssd1327 *spi_ssd1327, uint8_t x, uint8_t y,
+                          uint8_t width, uint8_t height, ssd1327_gs_t gs);
+void spi_oled_draw_circle(struct spi_ssd1327 *spi_ssd1327, uint8_t x, uint8_t y,
+                          uint8_t radius, ssd1327_gs_t gs);
+void spi_oled_draw_line(struct spi_ssd1327 *spi_ssd1327, uint8_t x0, uint8_t y0,
+                        uint8_t x1, uint8_t y1, ssd1327_gs_t gs);
 
 // Text drawing functions
 void spi_oled_drawText(struct spi_ssd1327 *spi_ssd1327, uint8_t x, uint8_t y,
-                      const variable_font_t *font, ssd1327_gs_t gs, const char *text);
+                       const variable_font_t *font, ssd1327_gs_t gs, const char *text);
 
 // Simplified shadow text - now just draws text twice with offset
 void spi_oled_drawTextWithShadow(struct spi_ssd1327 *spi_ssd1327, uint8_t x, uint8_t y,
-                                 const variable_font_t *font, ssd1327_gs_t gs, 
+                                 const variable_font_t *font, ssd1327_gs_t gs,
                                  ssd1327_gs_t gs_shadow, int8_t offset_x, int8_t offset_y,
                                  const char *text);
 
 // Image drawing function
 void spi_oled_drawImage(struct spi_ssd1327 *spi_ssd1327, uint8_t x, uint8_t y,
-                       uint8_t width, uint8_t height, const uint8_t *image);
+                        uint8_t width, uint8_t height, const uint8_t *image);
 
 // Utility functions
 void spi_oled_set_auto_refresh(struct spi_ssd1327 *spi_ssd1327, bool auto_refresh);
@@ -99,6 +99,8 @@ typedef struct
     uint8_t frame_count;
     const uint8_t *animation_data;
     uint32_t frame_delay_ms;
-    bool isPlaying;
+    bool is_playing;
+    uint8_t stop_frame;
+    bool reverse;
     TaskHandle_t task_handle;
 } spi_oled_animation_t;

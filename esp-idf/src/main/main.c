@@ -165,35 +165,35 @@ static void esp_now_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t 
 
     if (data_len == PING_MAGIC_LEN && memcmp(data, PING_MAGIC, PING_MAGIC_LEN) == 0) // PING MSG
     {
-/*         int64_t now = esp_timer_get_time() / 1000; // ms
-        bool found = false;
+        /*         int64_t now = esp_timer_get_time() / 1000; // ms
+                bool found = false;
 
-        for (int i = 0; i < MAX_MAC_TRACK; ++i)
-        {
-            if (mac_track_list[i].valid &&
-                memcmp(mac_track_list[i].mac, recv_info->src_addr, ESP_NOW_ETH_ALEN) == 0)
-            {
-                mac_track_list[i].last_seen_ms = now;
-                found = true;
-                break;
-            }
-        }
-
-        if (!found)
-        {
-            for (int i = 0; i < MAX_MAC_TRACK; ++i)
-            {
-                if (!mac_track_list[i].valid)
+                for (int i = 0; i < MAX_MAC_TRACK; ++i)
                 {
-                    memcpy(mac_track_list[i].mac, recv_info->src_addr, ESP_NOW_ETH_ALEN);
-                    mac_track_list[i].last_seen_ms = now;
-                    mac_track_list[i].valid = true;
-                    ESP_LOGI(TAG, "Added MAC from ping:");
-                    print_mac(recv_info->src_addr);
-                    break;
+                    if (mac_track_list[i].valid &&
+                        memcmp(mac_track_list[i].mac, recv_info->src_addr, ESP_NOW_ETH_ALEN) == 0)
+                    {
+                        mac_track_list[i].last_seen_ms = now;
+                        found = true;
+                        break;
+                    }
                 }
-            }
-        } */
+
+                if (!found)
+                {
+                    for (int i = 0; i < MAX_MAC_TRACK; ++i)
+                    {
+                        if (!mac_track_list[i].valid)
+                        {
+                            memcpy(mac_track_list[i].mac, recv_info->src_addr, ESP_NOW_ETH_ALEN);
+                            mac_track_list[i].last_seen_ms = now;
+                            mac_track_list[i].valid = true;
+                            ESP_LOGI(TAG, "Added MAC from ping:");
+                            print_mac(recv_info->src_addr);
+                            break;
+                        }
+                    }
+                } */
     }
     // CMD: prefix handling
     else if (data_len >= 4 && memcmp(data, "CMD:", 4) == 0)
@@ -611,7 +611,7 @@ static void animation_task(void *pvParameters)
     spi_oled_animation_t *anim = (spi_oled_animation_t *)pvParameters;
     uint8_t current_frame = 0;
     uint8_t bytes_per_row = (anim->width + 1) / 2; // 4bpp packing
-    while (anim->isPlaying == true)
+    while (anim->is_playing == true || (anim->stop_frame != -1 && current_frame != anim->stop_frame))
     {
         // Calculate frame data offset
         const uint8_t *frame_data = anim->animation_data +
@@ -630,10 +630,19 @@ static void animation_task(void *pvParameters)
         xSemaphoreGive(spi_mutex);
 
         // Move to next frame
-        current_frame++;
+        if (anim->reverse == true)
+        {
+            current_frame--;
+        }
+        else
+            current_frame++;
         if (current_frame >= anim->frame_count)
         {
             current_frame = 0;
+        }
+        else if (current_frame < 0)
+        {
+            current_frame = anim->frame_count - 1; // Loop back to last frame
         }
 
         vTaskDelay(pdMS_TO_TICKS(anim->frame_delay_ms));
@@ -711,6 +720,7 @@ void oled_task(void *arg)
     anim->frame_count = 14;
     anim->animation_data = (const uint8_t *)idle_single;
     anim->frame_delay_ms = 1000 / 5;
+    anim->stop_frame = -1;
     anim->task_handle = NULL;
 
     spi_oled_animation_t *anim_idleBar = malloc(sizeof(spi_oled_animation_t));
@@ -723,6 +733,7 @@ void oled_task(void *arg)
     anim_idleBar->frame_count = 14;
     anim_idleBar->animation_data = (const uint8_t *)idle_bar;
     anim_idleBar->frame_delay_ms = 1000 / 15;
+    anim_idleBar->stop_frame = -1;
     anim_idleBar->task_handle = NULL;
 
     spi_oled_animation_t *anim_waveBar = malloc(sizeof(spi_oled_animation_t));
@@ -735,6 +746,7 @@ void oled_task(void *arg)
     anim_waveBar->frame_count = 30;
     anim_waveBar->animation_data = (const uint8_t *)wave_bar;
     anim_waveBar->frame_delay_ms = 1000 / 30;
+    anim_waveBar->stop_frame = -1;
     anim_waveBar->task_handle = NULL;
 
     draw_status();
@@ -743,7 +755,7 @@ void oled_task(void *arg)
 
     while (1)
     {
-        
+
         if (is_command)
         {
             state = 3;
@@ -766,11 +778,12 @@ void oled_task(void *arg)
             switch (state)
             {
             case 0: // Idle
-                anim_waveBar->isPlaying = false;
-                anim->isPlaying = true;
-                anim_idleBar->isPlaying = true;
+                anim_waveBar->is_playing = false;
+                anim->is_playing = true;
+                anim_idleBar->is_playing = true;
                 xTaskCreate(animation_task, "idleSingleAnim", 2048, anim, 5, &anim->task_handle);
-                if(isFirstBoot) {
+                if (isFirstBoot)
+                {
                     xTaskCreate(animation_task, "idleBarAnim", 2048, anim_idleBar, 5, &anim_idleBar->task_handle);
                     isFirstBoot = false;
                 }
@@ -778,17 +791,17 @@ void oled_task(void *arg)
                 break;
             case 1: // Speaking
                 // stop idleBarAnim
-                anim->isPlaying = false;
-                anim_idleBar->isPlaying = false;
-                anim_waveBar->isPlaying = true;
+                anim->is_playing = false;
+                anim_idleBar->is_playing = false;
+                anim_waveBar->is_playing = true;
                 xTaskCreate(animation_task, "waveBarAnim", 2048, anim_waveBar, 5, &anim_waveBar->task_handle);
                 break;
             case 2: // Receiving
                 break;
             case 3: // Command
                 // stop idleBarAnim
-                anim->isPlaying = false;
-                anim_idleBar->isPlaying = false;
+                anim->is_playing = false;
+                anim_idleBar->is_playing = false;
                 spi_oled_draw_square(&spi_ssd1327, 0, 16, 128, 112, SSD1327_GS_0);
                 break;
             }
