@@ -99,6 +99,7 @@ static led_strip_handle_t led_strip;
 #define MAX_MAC_TRACK 9
 #define MAC_TIMEOUT_MS 20000
 int macCount = 1;
+int lastMacCount = 0;
 
 typedef struct
 {
@@ -122,6 +123,7 @@ const variable_font_t font_30 = {
     .data = font_30_data};
 
 static esp_afe_sr_iface_t *afe_handle = NULL;
+srmodel_list_t *models = NULL;
 StreamBufferHandle_t play_stream_buf;
 static QueueHandle_t s_recv_queue = NULL;
 static uint8_t broadcast_mac[ESP_NOW_ETH_ALEN] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}; // Broadcast MAC address (all ones)
@@ -151,7 +153,7 @@ static void esp_now_send_cb(const uint8_t *mac_addr, esp_now_send_status_t statu
 {
     if (status == ESP_NOW_SEND_SUCCESS)
     {
-        ESP_LOGI(TAG, "ESP-NOW data sent successfully");
+        //ESP_LOGI(TAG, "ESP-NOW data sent successfully");
     }
     else
     {
@@ -342,7 +344,7 @@ void send_data_esp_now(const uint8_t *data, size_t len)
         }
         else
         {
-            ESP_LOGI(TAG, "Sent %zu bytes of data via ESP-NOW (offset %zu)", chunk_size, offset);
+            //ESP_LOGI(TAG, "Sent %zu bytes of data via ESP-NOW (offset %zu)", chunk_size, offset);
         }
 
         offset += chunk_size;
@@ -507,13 +509,20 @@ void detect_Task(void *arg)
 {
     esp_afe_sr_data_t *afe_data = arg;
     int afe_chunksize = afe_handle->get_fetch_chunksize(afe_data);
-    printf("detect chunksize:%d\n", afe_chunksize);
+    char *mn_name = esp_srmodel_filter(models, ESP_MN_PREFIX, ESP_MN_CHINESE);
+    printf("multinet:%s\n", mn_name);
+    esp_mn_iface_t *multinet = esp_mn_handle_from_name(mn_name);
+    model_iface_data_t *model_data = multinet->create(mn_name, 6000);
+    int mu_chunksize = multinet->get_samp_chunksize(model_data);
+    assert(mu_chunksize == afe_chunksize);
     int16_t *buff = malloc(afe_chunksize * sizeof(int16_t));
+    multinet->print_active_speech_commands(model_data);
+    printf("------------detect start------------\n");
     assert(buff);
     printf("------------vad start------------\n");
 
     uint8_t *g711_output = malloc(ENCODED_BUF_SIZE);
-
+    esp_mn_state_t mn_state = ESP_MN_STATE_DETECTING;
     while (1)
     {
         afe_fetch_result_t *res = afe_handle->fetch(afe_data);
@@ -523,12 +532,6 @@ void detect_Task(void *arg)
             break;
         }
 
-        // Print the audio data values
-        /*       int samples = res->data_size / sizeof(int16_t);
-              for (int i = 0; i < samples; i++) {
-                  printf("OUT=%d\n", res->data[i]);
-              } */
-
         // printf("vad state: %s\n",res->vad_state == VAD_SILENCE ? "noise" : "speech");
 
         // save speech data
@@ -537,7 +540,7 @@ void detect_Task(void *arg)
             is_speaking = true;
             // Define a buffer for g711 output
             size_t g711_len = 0;
-
+            
             if (g711_output == NULL)
             {
                 printf("Failed to allocate g711 buffer\n");
@@ -549,13 +552,14 @@ void detect_Task(void *arg)
                 // send_data((const uint8_t *)res->vad_cache, res->vad_cache_size);
                 //  Make sure we have enough data for at least one frame
                 encode_g711(res->vad_cache, res->vad_cache_size, g711_output, &g711_len);
-
+                multinet->clean(model_data);
                 if (g711_len > 0)
                 {
-                    printf("Encoded VAD cache: %zu bytes       Raw: %zu bytes\n", g711_len, res->vad_cache_size);
+                    //printf("Encoded VAD cache: %zu bytes       Raw: %zu bytes\n", g711_len, res->vad_cache_size);
                     // send_data(g711_output, g711_len);
                     send_data_esp_now(g711_output, g711_len);
                 }
+                mn_state = multinet->detect(model_data, res->vad_cache);
             }
 
             if (res->vad_state == VAD_SPEECH)
@@ -565,18 +569,38 @@ void detect_Task(void *arg)
 
                 g711_len = 0; // Reset for new encoding
                 encode_g711(res->data, res->data_size, g711_output, &g711_len);
-
+                
                 if (g711_len > 0)
                 {
-                    printf("Encoded speech data: %zu bytes      Raw: %zu bytes\n", g711_len, res->data_size);
+                    //printf("Encoded speech data: %zu bytes      Raw: %zu bytes\n", g711_len, res->data_size);
                     // send_data(g711_output, g711_len);
                     send_data_esp_now(g711_output, g711_len);
                 }
+                mn_state = multinet->detect(model_data, res->data);
+            }
+            //MultiNet words detect
+            if (mn_state == ESP_MN_STATE_DETECTING) {
+                continue;
+            }
+
+            if (mn_state == ESP_MN_STATE_DETECTED) {
+                esp_mn_results_t *mn_result = multinet->get_results(model_data);
+                for (int i = 0; i < mn_result->num; i++) {
+                    printf("TOP %d, command_id: %d, phrase_id: %d, string:%s prob: %f\n", 
+                    i+1, mn_result->command_id[i], mn_result->phrase_id[i], mn_result->string, mn_result->prob[i]);
+                }
+            }
+            if (mn_state == ESP_MN_STATE_TIMEOUT) {
+                esp_mn_results_t *mn_result = multinet->get_results(model_data);
+                printf("timeout, string:%s\n", mn_result->string);
+                continue;
             }
         }
         else
         {
             is_speaking = false;
+            //multinet->clean(model_data);
+            
         }
     }
     if (buff)
@@ -830,11 +854,12 @@ void oled_task(void *arg)
         {
             state = 0; // Idle
         }
-        if(state == 0){
+        if(state == 0 && macCount != lastMacCount){
+            lastMacCount = macCount;
             //convert macCount from int to string
             char macCountStr[2]; // Enough space for int range + null terminator
             sprintf(macCountStr, "%d", macCount);
-
+            spi_oled_draw_square(&spi_ssd1327, 74, 38, 36, 36, SSD1327_GS_0);
             spi_oled_drawText(&spi_ssd1327, 86, 46, &font_30, SSD1327_GS_5, macCountStr);
             spi_oled_drawText(&spi_ssd1327, 85, 45, &font_30, SSD1327_GS_15, macCountStr);
         }
@@ -850,8 +875,7 @@ void oled_task(void *arg)
             {
             case 0: // Idle
                 anim->is_playing = true;
-                spi_oled_draw_square(&spi_ssd1327, 74, 38, 36, 36, SSD1327_GS_0);
-                
+                lastMacCount = 0;
                 xTaskCreate(animation_task, "idleSingleAnim", 2048, anim, 5, &anim->task_handle);
                 if (isFirstBoot)
                 {
@@ -986,7 +1010,7 @@ void app_main()
 
     ESP_ERROR_CHECK(esp_board_init(SAMPLE_RATE, 1, BIT_DEPTH));
 
-    srmodel_list_t *models = esp_srmodel_init("model");
+    models = esp_srmodel_init("model");
     afe_config_t *afe_config = afe_config_init(esp_get_input_format(), models, AFE_TYPE_SR, AFE_MODE_LOW_COST);
     /*     afe_config->agc_init = true; // Enable AGC
         afe_config->agc_mode = AFE_AGC_MODE_WAKENET; // Use WEBRTC AGC
@@ -1072,5 +1096,5 @@ void app_main()
     xTaskCreatePinnedToCore(i2s_writer_task, "i2sWriter", 4 * 1024, NULL, 5, NULL, 0);
     xTaskCreatePinnedToCore(oled_task, "oled", 4 * 1024, NULL, 5, NULL, 0);
     xTaskCreatePinnedToCore(batteryLevel_Task, "battery", 4 * 1024, NULL, 5, NULL, 0);
-    xTaskCreatePinnedToCore(ping_task, "ping", 4 * 1024, NULL, 5, NULL, 0);
+    xTaskCreatePinnedToCore(ping_task, "ping", 2 * 1024, NULL, 5, NULL, 0);
 }
