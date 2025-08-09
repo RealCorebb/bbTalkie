@@ -10,6 +10,7 @@ typedef struct
     TaskHandle_t task_handle;
 } spi_oled_animation_t;
 
+
 spi_oled_animation_t anim = {
     .x = 10,
     .y = 35,

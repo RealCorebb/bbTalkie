@@ -55,8 +55,10 @@
 #include "include/images/mic.h"
 #include "include/images/volume.h"
 #include "include/images/home.h"
+#include "include/images/custom.h"
 
 #include "include/animation.h"
+#include "include/command_map.h"
 
 #include "include/fonts/fusion_pixel.h"
 #include "include/fonts/fusion_pixel_30.h"
@@ -102,6 +104,7 @@ static led_strip_handle_t led_strip;
 #define MAC_TIMEOUT_MS 20000
 int macCount = 1;
 int lastMacCount = 0;
+spi_oled_animation_t *anim_currentCommand = NULL;
 
 typedef struct
 {
@@ -365,6 +368,62 @@ bool get_esp_now_data(esp_now_recv_data_t *recv_data)
     return (xQueueReceive(s_recv_queue, recv_data, 0) == pdTRUE);
 }
 
+// Animation task function
+static void animation_task(void *pvParameters)
+{
+    spi_oled_animation_t *anim = (spi_oled_animation_t *)pvParameters;
+    if (anim == NULL) {
+        // Handle error - invalid key
+        printf("Invalid animation parameters\n");
+        vTaskDelete(NULL);
+        return;
+    }
+    int current_frame = 0;
+    uint8_t bytes_per_row = (anim->width + 1) / 2; // 4bpp packing
+    printf("anim info: x:%d, y:%d, width:%d, height:%d, frame_count:%d, stop_frame:%d, reverse:%d\n",
+           anim->x, anim->y, anim->width, anim->height, anim->frame_count, anim->stop_frame, anim->reverse);
+    while ((anim->stop_frame == -1 && anim->is_playing == true) || 
+        (anim->stop_frame != -1 && (anim->is_playing == true || current_frame != anim->stop_frame)))
+    {
+        if(anim->stop_frame == -1 && anim->is_playing == false) {
+            break;
+        }
+        if(anim->stop_frame != -1 && anim->is_playing == false && current_frame == anim->stop_frame) break;
+        // Calculate frame data offset
+        const uint8_t *frame_data = anim->animation_data +
+                                    (current_frame * anim->height * bytes_per_row);
+
+        // Lock SPI access
+        xSemaphoreTake(spi_mutex, portMAX_DELAY);
+
+        // Draw current frame
+        spi_oled_drawImage(&spi_ssd1327,
+                           anim->x, anim->y,
+                           anim->width, anim->height,
+                           frame_data);
+
+        // Release SPI access
+        xSemaphoreGive(spi_mutex);
+
+        // Move to next frame
+        if(anim->reverse == true){
+            current_frame--;
+        }
+        else current_frame++;
+        if (current_frame >= anim->frame_count)
+        {
+            current_frame = 0;
+        }
+        else if( current_frame < 0)
+        {
+            current_frame = anim->frame_count - 1;
+        }
+ 
+        vTaskDelay(pdMS_TO_TICKS(anim->frame_delay_ms));
+    }
+    vTaskDelete(NULL);
+}
+
 void feed_Task(void *arg)
 {
     esp_afe_sr_data_t *afe_data = arg;
@@ -591,6 +650,13 @@ void detect_Task(void *arg)
                     printf("TOP %d, command_id: %d, phrase_id: %d, string:%s prob: %f\n", 
                     i+1, mn_result->command_id[i], mn_result->phrase_id[i], mn_result->string, mn_result->prob[i]);
                 }
+                printf("Playing animation for command_id: %d\n", mn_result->command_id[0]);
+                if(anim_currentCommand != NULL) {
+                    anim_currentCommand->is_playing = false;
+                }
+                anim_currentCommand = get_animation_by_key(mn_result->command_id[0]);
+                lastState = -1;
+                is_command = true;
             }
             if (mn_state == ESP_MN_STATE_TIMEOUT) {
                 esp_mn_results_t *mn_result = multinet->get_results(model_data);
@@ -654,53 +720,6 @@ void init_audio_stream_buffer()
     assert(play_stream_buf);
 }
 
-// Animation task function
-static void animation_task(void *pvParameters)
-{
-    spi_oled_animation_t *anim = (spi_oled_animation_t *)pvParameters;
-    int current_frame = 0;
-    uint8_t bytes_per_row = (anim->width + 1) / 2; // 4bpp packing
-    while ((anim->stop_frame == -1 && anim->is_playing == true) || 
-        (anim->stop_frame != -1 && (anim->is_playing == true || current_frame != anim->stop_frame)))
-    {
-        if(anim->stop_frame == -1 && anim->is_playing == false) {
-            break;
-        }
-        if(anim->stop_frame != -1 && anim->is_playing == false && current_frame == anim->stop_frame) break;
-        // Calculate frame data offset
-        const uint8_t *frame_data = anim->animation_data +
-                                    (current_frame * anim->height * bytes_per_row);
-
-        // Lock SPI access
-        xSemaphoreTake(spi_mutex, portMAX_DELAY);
-
-        // Draw current frame
-        spi_oled_drawImage(&spi_ssd1327,
-                           anim->x, anim->y,
-                           anim->width, anim->height,
-                           frame_data);
-
-        // Release SPI access
-        xSemaphoreGive(spi_mutex);
-
-        // Move to next frame
-        if(anim->reverse == true){
-            current_frame--;
-        }
-        else current_frame++;
-        if (current_frame >= anim->frame_count)
-        {
-            current_frame = 0;
-        }
-        else if( current_frame < 0)
-        {
-            current_frame = anim->frame_count - 1;
-        }
- 
-        vTaskDelay(pdMS_TO_TICKS(anim->frame_delay_ms));
-    }
-    vTaskDelete(NULL);
-}
 
 void draw_status()
 {
@@ -829,9 +848,9 @@ void oled_task(void *arg)
                 break;
             case 3: // Command
                 // stop idleBarAnim
-                anim.is_playing = false;
-                anim_idleBar.is_playing = false;
-                spi_oled_draw_square(&spi_ssd1327, 0, 16, 128, 112, SSD1327_GS_0);
+                printf("Create command anim task\n");
+                anim_currentCommand->is_playing = true;
+                xTaskCreate(animation_task, "idleSingleAnim", 2048, anim_currentCommand, 5, &anim_currentCommand->task_handle);
                 break;
             }
         }
