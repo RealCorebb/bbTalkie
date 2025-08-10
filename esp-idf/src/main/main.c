@@ -571,7 +571,7 @@ void detect_Task(void *arg)
     char *mn_name = esp_srmodel_filter(models, ESP_MN_PREFIX, ESP_MN_CHINESE);
     printf("multinet:%s\n", mn_name);
     esp_mn_iface_t *multinet = esp_mn_handle_from_name(mn_name);
-    model_iface_data_t *model_data = multinet->create(mn_name, 1500);
+    model_iface_data_t *model_data = multinet->create(mn_name, 1488);
     int mu_chunksize = multinet->get_samp_chunksize(model_data);
     printf("mu chunksize:%d, afe chunksize:%d\n", mu_chunksize, afe_chunksize);
     assert(mu_chunksize == afe_chunksize);
@@ -597,10 +597,6 @@ void detect_Task(void *arg)
         // save speech data
         if (res->vad_state != VAD_SILENCE && !is_receiving)
         {
-            if(is_speaking == false){
-                printf("clean\n");
-                multinet->clean(model_data);
-            }
             is_speaking = true;
             // Define a buffer for g711 output
             size_t g711_len = 0;
@@ -670,8 +666,11 @@ void detect_Task(void *arg)
         }
         else
         {
+            if(is_speaking == true){ //Call once per speaking
+                printf("clean\n");
+                multinet->clean(model_data);
+            }
             is_speaking = false;
-            //multinet->clean(model_data);
             
         }
     }
