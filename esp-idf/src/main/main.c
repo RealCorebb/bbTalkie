@@ -368,6 +368,29 @@ bool get_esp_now_data(esp_now_recv_data_t *recv_data)
     return (xQueueReceive(s_recv_queue, recv_data, 0) == pdTRUE);
 }
 
+// Fade in drawText
+void fade_in_drawCount(void *arg)
+{
+    const char *input_text = (const char *)arg;
+    if (input_text == NULL || strlen(input_text) == 0)
+    {
+        printf("Invalid text\n");
+        vTaskDelete(NULL);
+        return;
+    }
+    for(int i = 0; i < 15; i++){
+        if(state == 0){
+            spi_oled_drawText(&spi_ssd1327, 86, 46, &font_30, i / 2, input_text, 0);
+            spi_oled_drawText(&spi_ssd1327, 85, 45, &font_30, i , input_text, 0);
+        }
+        else{
+            vTaskDelete(NULL);
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000 / 15));
+    }
+    vTaskDelete(NULL);
+}
+
 // Animation task function
 static void animation_task(void *pvParameters)
 {
@@ -834,8 +857,7 @@ void oled_task(void *arg)
             char macCountStr[2]; // Enough space for int range + null terminator
             sprintf(macCountStr, "%d", macCount);
             spi_oled_draw_square(&spi_ssd1327, 74, 38, 36, 36, SSD1327_GS_0);
-            spi_oled_drawText(&spi_ssd1327, 86, 46, &font_30, SSD1327_GS_5, macCountStr,0);
-            spi_oled_drawText(&spi_ssd1327, 85, 45, &font_30, SSD1327_GS_15, macCountStr,0);
+            xTaskCreate(fade_in_drawCount, "drawCount", 2048, macCountStr, 5, NULL);
         }
         if (state != lastState)
         {
