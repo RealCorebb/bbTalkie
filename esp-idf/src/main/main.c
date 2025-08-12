@@ -637,7 +637,7 @@ void detect_Task(void *arg)
 
                 if (g711_len > 0)
                 {
-                    // printf("Encoded VAD cache: %zu bytes       Raw: %zu bytes\n", g711_len, res->vad_cache_size);
+                    printf("Encoded VAD cache: %zu bytes       Raw: %zu bytes\n", g711_len, res->vad_cache_size);
                     // send_data(g711_output, g711_len);
                     send_data_esp_now(g711_output, g711_len);
                 }
@@ -860,6 +860,7 @@ void oled_task(void *arg)
                 printf("Idle job create\n");
                 break;
             case 1: // Speaking
+                isFirstBoot = false;
                 anim_waveBar.reverse = false;
                 anim_waveBar.is_playing = true;
                 anim_podcast.is_playing = true;
@@ -1063,13 +1064,13 @@ void app_main()
     esp_sleep_enable_ext1_wakeup((1ULL << GPIO_WAKEUP_2), ESP_EXT1_WAKEUP_ANY_LOW); //(1ULL << GPIO_WAKEUP_1) |
 
     init_audio_stream_buffer();
+    xTaskCreatePinnedToCore(oled_task, "oled", 4 * 1024, NULL, 5, NULL, 0);
     // esp_audio_play((int16_t*)m_1, sizeof(m_1), portMAX_DELAY);
     xTaskCreatePinnedToCore(&feed_Task, "feed", 8 * 1024, (void *)afe_data, 5, NULL, 0);
     xTaskCreatePinnedToCore(&detect_Task, "detect", 4 * 1024, (void *)afe_data, 5, NULL, 1);
     // xTaskCreatePinnedToCore(play_audio_task, "music", 4 * 1024, NULL, 5, NULL, 0);
     xTaskCreatePinnedToCore(decode_Task, "decode", 4 * 1024, NULL, 5, NULL, 0);
     xTaskCreatePinnedToCore(i2s_writer_task, "i2sWriter", 4 * 1024, NULL, 5, NULL, 0);
-    xTaskCreatePinnedToCore(oled_task, "oled", 4 * 1024, NULL, 5, NULL, 0);
     xTaskCreatePinnedToCore(batteryLevel_Task, "battery", 4 * 1024, NULL, 5, NULL, 0);
     xTaskCreatePinnedToCore(ping_task, "ping", 2 * 1024, NULL, 5, NULL, 0);
 }
