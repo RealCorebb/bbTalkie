@@ -134,6 +134,8 @@ static QueueHandle_t s_recv_queue = NULL;
 static uint8_t broadcast_mac[ESP_NOW_ETH_ALEN] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}; // Broadcast MAC address (all ones)
 volatile bool is_receiving = false;
 volatile bool is_speaking = false;
+bool isMicOff = false;
+bool isMute = false;
 bool is_command = false;
 int state = 0; // 0: idle, 1: speaking, 2: receiving, 3: command
 int lastState = -1;
@@ -775,8 +777,18 @@ void draw_status()
 {
     spi_oled_drawText(&spi_ssd1327, 43, 0, &font_10, SSD1327_GS_5, "bbTalkie",0);
     spi_oled_drawText(&spi_ssd1327, 44, 0, &font_10, SSD1327_GS_15, "bbTalkie",0);
-    spi_oled_drawImage(&spi_ssd1327, 0, 0, 5, 10, (const uint8_t *)mic_high);
-    spi_oled_drawImage(&spi_ssd1327, 6, 0, 9, 10, (const uint8_t *)volume_on);
+    if(!isMicOff){
+        spi_oled_drawImage(&spi_ssd1327, 0, 0, 5, 10, (const uint8_t *)mic_high);
+    }
+    else{
+        spi_oled_drawImage(&spi_ssd1327, 0, 0, 5, 10, (const uint8_t *)mic_off);
+    }
+    if(!isMute){
+        spi_oled_drawImage(&spi_ssd1327, 6, 0, 9, 10, (const uint8_t *)volume_on);
+    }
+    else{
+        spi_oled_drawImage(&spi_ssd1327, 6, 0, 9, 10, (const uint8_t *)volume_off);
+    }
     spi_oled_drawImage(&spi_ssd1327, 112, 0, 16, 10, (const uint8_t *)battery_4);
 }
 
@@ -991,6 +1003,21 @@ static void button_long_press_cb(void *arg, void *usr_data)
     esp_deep_sleep_start();
 }
 
+static void button_single_click_cb(void *arg, void *usr_data)
+{
+    printf("Single click\n");
+    is_command = false;
+    isMicOff = !isMicOff;
+    draw_status();
+}
+
+static void button_double_click_cb(void *arg, void *usr_data)
+{
+    printf("Double click\n");
+    isMute = !isMute;
+    draw_status();
+}
+
 void app_main()
 {
 
@@ -1073,6 +1100,8 @@ void app_main()
 
     // Register event callbacks
     iot_button_register_cb(btn, BUTTON_LONG_PRESS_START, NULL, button_long_press_cb, NULL);
+    iot_button_register_cb(btn, BUTTON_SINGLE_CLICK, NULL, button_single_click_cb, NULL);
+    iot_button_register_cb(btn, BUTTON_DOUBLE_CLICK, NULL, button_double_click_cb, NULL);
 
     ESP_LOGI(TAG, "Button initialized and ready");
 
