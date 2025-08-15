@@ -76,5 +76,18 @@ spi_oled_animation_t anim_speaker = {
     .task_handle = NULL
 };
 
+spi_oled_animation_t anim_byebye = {
+    .x = 0,
+    .y = 0,
+    .width = 128,
+    .height = 128,
+    .frame_count = 7,
+    .animation_data = (const uint8_t *)byebye_image,
+    .frame_delay_ms = 1000 / 15,
+    .stop_frame = -1,
+    .reverse = false,
+    .task_handle = NULL
+};
+
 //custom map
 

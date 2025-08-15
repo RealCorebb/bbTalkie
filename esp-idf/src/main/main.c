@@ -22,7 +22,7 @@
 #include <math.h> // Add this for sin() function
 #include <string.h>
 #include "driver/gpio.h"
-#include "include/byebye.h"
+#include "include/sound.h"
 #include "esp_audio_enc.h"
 #include "esp_audio_enc_reg.h"
 #include "esp_audio_enc_default.h"
@@ -134,6 +134,7 @@ static QueueHandle_t s_recv_queue = NULL;
 static uint8_t broadcast_mac[ESP_NOW_ETH_ALEN] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}; // Broadcast MAC address (all ones)
 volatile bool is_receiving = false;
 volatile bool is_speaking = false;
+bool isShoutdown = false;
 bool isMicOff = false;
 bool isMute = false;
 bool is_command = false;
@@ -423,7 +424,7 @@ static void animation_task(void *pvParameters)
         spi_oled_drawImage(&spi_ssd1327,
                            anim->x, anim->y,
                            anim->width, anim->height,
-                           frame_data);
+                           frame_data,SSD1327_GS_15);
 
         // Release SPI access
         xSemaphoreGive(spi_mutex);
@@ -463,7 +464,7 @@ void bubble_text_task(void *arg)
     text[sizeof(text) - 1] = '\0';
 
     for(int i = -6; i < 0; i++){
-        spi_oled_drawImage(&spi_ssd1327, 17, i, 93, 11, (const uint8_t *)text_bubble);
+        spi_oled_drawImage(&spi_ssd1327, 17, i, 93, 11, (const uint8_t *)text_bubble,SSD1327_GS_15);
         spi_oled_drawText(&spi_ssd1327, 18, i, &font_10, SSD1327_GS_1, text, 91);
         vTaskDelay(pdMS_TO_TICKS(1000 / 15));
     }
@@ -731,6 +732,65 @@ void detect_Task(void *arg)
     vTaskDelete(NULL);
 }
 
+void byebye_anim(void *pvParameters){
+    spi_oled_animation_t *anim = &anim_byebye;
+    int current_frame = 0;
+    uint8_t bytes_per_row = (anim->width + 1) / 2; // 4bpp packing
+    int loop_count = 0; // Track which loop we're on
+    
+    for(int i=0; i< 3 * anim->frame_count; i++) // Changed to 4 loops
+    {
+        const uint8_t *frame_data = anim->animation_data +
+                            (current_frame * anim->height * bytes_per_row);
+        
+        // Determine gray scale based on loop count
+        uint8_t gray_scale;
+        if (loop_count < 2) {
+            gray_scale = SSD1327_GS_15; // Full brightness for first 3 loops
+        } else {
+            // Gradual fade during 4th loop: from 15 down to 0
+            int fade_progress = anim->frame_count - current_frame - 1;
+            gray_scale = (fade_progress * 15) / (anim->frame_count - 1);
+            printf("Fade progress: %d, Gray scale: %d\n", fade_progress, gray_scale);
+        }
+        
+        // Lock SPI access
+        xSemaphoreTake(spi_mutex, portMAX_DELAY);
+        // Draw current frame
+        spi_oled_drawImage(&spi_ssd1327,
+                           anim->x, anim->y,
+                           anim->width, anim->height,
+                           frame_data, gray_scale);
+        // Release SPI access
+        xSemaphoreGive(spi_mutex);
+        
+        // Move to next frame
+        current_frame++;
+        if (current_frame >= anim->frame_count)
+        {
+            current_frame = 0;
+            loop_count++; // Increment loop counter when we complete a full animation cycle
+        }
+        vTaskDelay(pdMS_TO_TICKS(anim->frame_delay_ms));
+    }
+    //spi_oled_deinit(&spi_ssd1327);
+    gpio_set_level(GPIO_NUM_3, 0);
+    gpio_set_level(GPIO_NUM_9, 0);
+    esp_deep_sleep_start();
+    vTaskDelete(NULL);
+}
+
+void boot_sound(void *pvParameters)
+{
+    vTaskDelay(pdMS_TO_TICKS(650));
+    esp_err_t ret = esp_audio_play((const int16_t *)boot, sizeof(boot) / 2, portMAX_DELAY);
+    if (ret != ESP_OK)
+    {
+        printf("Failed to play boot sound: %s", esp_err_to_name(ret));
+    }
+    vTaskDelete(NULL);
+}
+
 
 void byebye_sound(void *pvParameters)
 {
@@ -739,10 +799,6 @@ void byebye_sound(void *pvParameters)
     {
         printf("Failed to play byebye sound: %s", esp_err_to_name(ret));
     }
-    gpio_set_level(GPIO_NUM_3, 0);
-    gpio_set_level(GPIO_NUM_9, 0);
-    spi_oled_deinit(&spi_ssd1327);
-    esp_deep_sleep_start();
     vTaskDelete(NULL);
 }
 
@@ -779,18 +835,18 @@ void draw_status()
     spi_oled_drawText(&spi_ssd1327, 43, 0, &font_10, SSD1327_GS_5, "bbTalkie",0);
     spi_oled_drawText(&spi_ssd1327, 44, 0, &font_10, SSD1327_GS_15, "bbTalkie",0);
     if(!isMicOff){
-        spi_oled_drawImage(&spi_ssd1327, 0, 0, 5, 10, (const uint8_t *)mic_high);
+        spi_oled_drawImage(&spi_ssd1327, 0, 0, 5, 10, (const uint8_t *)mic_high,SSD1327_GS_15);
     }
     else{
-        spi_oled_drawImage(&spi_ssd1327, 0, 0, 5, 10, (const uint8_t *)mic_off);
+        spi_oled_drawImage(&spi_ssd1327, 0, 0, 5, 10, (const uint8_t *)mic_off,SSD1327_GS_15);
     }
     if(!isMute){
-        spi_oled_drawImage(&spi_ssd1327, 6, 0, 9, 10, (const uint8_t *)volume_on);
+        spi_oled_drawImage(&spi_ssd1327, 6, 0, 9, 10, (const uint8_t *)volume_on,SSD1327_GS_15);
     }
     else{
-        spi_oled_drawImage(&spi_ssd1327, 6, 0, 9, 10, (const uint8_t *)volume_off);
+        spi_oled_drawImage(&spi_ssd1327, 6, 0, 9, 10, (const uint8_t *)volume_off,SSD1327_GS_15);
     }
-    spi_oled_drawImage(&spi_ssd1327, 112, 0, 16, 10, (const uint8_t *)battery_4);
+    spi_oled_drawImage(&spi_ssd1327, 112, 0, 16, 10, (const uint8_t *)battery_4,SSD1327_GS_15);
 }
 
 void oled_task(void *arg)
@@ -835,11 +891,14 @@ void oled_task(void *arg)
     spi_oled_init(&spi_ssd1327);
 
     printf("screen is on\n");
-
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
-    spi_oled_drawImage(&spi_ssd1327, 0, 0, 128, 128, (const uint8_t *)logo);
+    spi_oled_framebuffer_clear(&spi_ssd1327, SSD1327_GS_0);
+    for (size_t i = 32; i > 0; i--)
+    {
+        spi_oled_drawImage(&spi_ssd1327, 0, i, 128, 128, (const uint8_t *)logo, (32-i)/2);
+        vTaskDelay(pdMS_TO_TICKS(1000 / 60));
+    }
     printf("logo is painted\n");
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    vTaskDelay(800 / portTICK_PERIOD_MS);
     spi_oled_framebuffer_clear(&spi_ssd1327, SSD1327_GS_0);
     draw_status();
 
@@ -847,7 +906,9 @@ void oled_task(void *arg)
 
     while (1)
     {
-
+        if (isShoutdown){
+            vTaskDelete(NULL);
+        }
         if (is_command)
         {
             state = 3;
@@ -997,8 +1058,15 @@ static void button_long_press_cb(void *arg, void *usr_data)
     ESP_ERROR_CHECK(led_strip_set_pixel(led_strip, 0, 0, 0, 0));
     ESP_ERROR_CHECK(led_strip_refresh(led_strip));
 
-    // Enter deep sleep
+    anim_waveBar.is_playing = false;
+    anim.is_playing = false;
+    anim_idleBar.is_playing = false;
+    anim_podcast.is_playing = false;
+    anim_speaker.is_playing = false;
+    isShoutdown = true;
     xTaskCreatePinnedToCore(byebye_sound, "byebyeSound", 4 * 1024, NULL, 5, NULL, 0);
+    xTaskCreatePinnedToCore(byebye_anim, "byebyeAnim", 4 * 1024, NULL, 5, NULL, 0);
+    
 }
 
 static void button_single_click_cb(void *arg, void *usr_data)
@@ -1114,6 +1182,7 @@ void app_main()
 
     init_audio_stream_buffer();
     xTaskCreatePinnedToCore(oled_task, "oled", 4 * 1024, NULL, 5, NULL, 0);
+    xTaskCreatePinnedToCore(boot_sound, "bootSound", 4 * 1024, NULL, 5, NULL, 1);
     // esp_audio_play((int16_t*)m_1, sizeof(m_1), portMAX_DELAY);
     xTaskCreatePinnedToCore(&feed_Task, "feed", 8 * 1024, (void *)afe_data, 5, NULL, 0);
     xTaskCreatePinnedToCore(&detect_Task, "detect", 4 * 1024, (void *)afe_data, 5, NULL, 1);

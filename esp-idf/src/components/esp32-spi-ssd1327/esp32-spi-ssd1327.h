@@ -80,7 +80,7 @@ void spi_oled_drawText(struct spi_ssd1327 *spi_ssd1327, int16_t x, int16_t y,
 
 // Image drawing function
 void spi_oled_drawImage(struct spi_ssd1327 *spi_ssd1327, int16_t x, int16_t y,
-                       uint8_t width, uint8_t height, const uint8_t *image);
+                       uint8_t width, uint8_t height, const uint8_t *image, uint8_t opacity);
 
 // Utility functions
 void spi_oled_set_auto_refresh(struct spi_ssd1327 *spi_ssd1327, bool auto_refresh);

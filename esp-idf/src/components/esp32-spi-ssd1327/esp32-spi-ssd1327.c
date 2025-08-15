@@ -496,9 +496,12 @@ void spi_oled_drawText(struct spi_ssd1327 *spi_ssd1327, int16_t x, int16_t y,
 }
 
 void spi_oled_drawImage(struct spi_ssd1327 *spi_ssd1327, int16_t x, int16_t y,
-                       uint8_t width, uint8_t height, const uint8_t *image)
+                       uint8_t width, uint8_t height, const uint8_t *image, uint8_t opacity)
 {
     if (!image || !spi_ssd1327->framebuffer) return;
+    
+    // Clamp opacity to valid range (0-15 for 4-bit grayscale)
+    if (opacity > 15) opacity = 15;
     
     uint8_t image_bytes_per_row = (width + 1) / 2;
     
@@ -510,7 +513,7 @@ void spi_oled_drawImage(struct spi_ssd1327 *spi_ssd1327, int16_t x, int16_t y,
     
     // Clip to screen boundaries
     if (y + height > SSD1327_HEIGHT) {
-        end_row = SSD1327_HEIGHT - y;
+        end_row = SSD1327_HEIGHT - 1 - y;
     }
     if (x + width > SSD1327_WIDTH) {
         end_col = SSD1327_WIDTH - x;
@@ -540,6 +543,12 @@ void spi_oled_drawImage(struct spi_ssd1327 *spi_ssd1327, int16_t x, int16_t y,
                 pixel_value = (image_byte >> 4) & 0x0F;  // Left pixel
             } else {
                 pixel_value = image_byte & 0x0F;         // Right pixel
+            }
+            
+            // Apply opacity by scaling the pixel value
+            if (opacity < 15) {
+                uint16_t blended = ((uint16_t)pixel_value * opacity) / 15;
+                pixel_value = (ssd1327_gs_t)blended;
             }
             
             spi_oled_set_pixel(spi_ssd1327, screen_x, screen_y, pixel_value);
