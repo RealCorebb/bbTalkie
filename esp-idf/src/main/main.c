@@ -1217,7 +1217,7 @@ void charging_Task(void *pvParameters)
             // Charge full
             if (need_update)
             {
-                spi_oled_drawImage(&spi_ssd1327, 112, 0, 16, 10, (const uint8_t *)battery_full, SSD1327_GS_15);
+                spi_oled_drawImage(&spi_ssd1327, 32, 44, 64, 40, (const uint8_t *)battery_large_full, SSD1327_GS_15);
                 led_color_t charge_full_color = {0, 255, 0};
                 set_led_color(charge_full_color);
             }
@@ -1233,9 +1233,9 @@ void charging_Task(void *pvParameters)
             if (now - last_blink >= 500 || need_update)
             {
                 blink_state = !blink_state;
-                const uint8_t *icons[] = {(const uint8_t *)battery_1, (const uint8_t *)battery_2, (const uint8_t *)battery_3, (const uint8_t *)battery_4};
+                const uint8_t *icons[] = {(const uint8_t *)battery_large_1, (const uint8_t *)battery_large_2, (const uint8_t *)battery_large_3, (const uint8_t *)battery_large_4};
                 int show_level = (blink_state) ? battery_level - 1: battery_level - 2;
-                spi_oled_drawImage(&spi_ssd1327, 112, 0, 16, 10, (const uint8_t *)icons[show_level], SSD1327_GS_15);
+                spi_oled_drawImage(&spi_ssd1327, 32, 44, 64, 40, (const uint8_t *)icons[show_level], SSD1327_GS_15);
                 last_blink = now;
             }
         }
@@ -1534,20 +1534,20 @@ void app_main()
     // Enable RTC pull-ups for all wake-up pins
     rtc_gpio_pullup_en(GPIO_WAKEUP_1);
     rtc_gpio_pullup_en(GPIO_WAKEUP_2);
-    // rtc_gpio_pullup_en(GPIO_WAKEUP_3);
+    rtc_gpio_pullup_en(GPIO_WAKEUP_3);
 
     // Disable pull-downs to ensure clean pull-up
     rtc_gpio_pulldown_dis(GPIO_WAKEUP_1);
     rtc_gpio_pulldown_dis(GPIO_WAKEUP_2);
-    // rtc_gpio_pulldown_dis(GPIO_WAKEUP_3);
+    rtc_gpio_pulldown_dis(GPIO_WAKEUP_3);
 
     // Enable wake-up on all three GPIOs when any goes low
-    esp_sleep_enable_ext1_wakeup((1ULL << GPIO_WAKEUP_1) | (1ULL << GPIO_WAKEUP_2), ESP_EXT1_WAKEUP_ANY_LOW); //| (1ULL << GPIO_WAKEUP_3)
+    esp_sleep_enable_ext1_wakeup((1ULL << GPIO_WAKEUP_1) | (1ULL << GPIO_WAKEUP_2) | (1ULL << GPIO_WAKEUP_3), ESP_EXT1_WAKEUP_ANY_LOW);
 
-    if (wakeup_pin_mask & (1ULL << GPIO_WAKEUP_1))
+    if ((wakeup_pin_mask & (1ULL << GPIO_WAKEUP_1)) || (wakeup_pin_mask & (1ULL << GPIO_WAKEUP_3)))
     {
         // Wakeup caused by GPIO4 (Charger CHRG)
-        printf("Wakeup caused by GPIO4 (Charger CHRG)\n");
+        printf("Wakeup caused by GPIO4 (Charger CHRG) / GPIO5 (Charger STDBY)\n");
         xTaskCreatePinnedToCore(charging_Task, "charging", 4 * 1024, NULL, 5, NULL, 0);
         return;
     }
