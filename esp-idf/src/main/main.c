@@ -948,8 +948,6 @@ void init_audio_stream_buffer()
 
 void draw_status()
 {
-    spi_oled_drawText(&spi_ssd1327, 43, 0, &font_10, SSD1327_GS_5, "bbTalkie", 0);
-    spi_oled_drawText(&spi_ssd1327, 44, 0, &font_10, SSD1327_GS_15, "bbTalkie", 0);
     if (!isMicOff)
     {
         spi_oled_drawImage(&spi_ssd1327, 0, 0, 5, 10, (const uint8_t *)mic_high, SSD1327_GS_15);
@@ -1106,6 +1104,8 @@ void oled_task(void *arg)
     printf("logo is painted\n");
     vTaskDelay(800 / portTICK_PERIOD_MS);
     spi_oled_framebuffer_clear(&spi_ssd1327, SSD1327_GS_0);
+    spi_oled_drawText(&spi_ssd1327, 43, 0, &font_10, SSD1327_GS_5, "bbTalkie", 0);
+    spi_oled_drawText(&spi_ssd1327, 44, 0, &font_10, SSD1327_GS_15, "bbTalkie", 0);
     draw_status();
     xTaskCreate(batteryLevel_Task, "battery", 4 * 1024, NULL, 5, NULL);
 
@@ -1140,8 +1140,9 @@ void oled_task(void *arg)
         }
         if (state != lastState)
         {
-            lastState = state;
             stopAllAnimation();
+            spi_oled_draw_square(&spi_ssd1327, 0, 14, 128, 80, SSD1327_GS_0);
+            lastState = state;
             switch (state)
             {
             case 0: // Idle
@@ -1497,8 +1498,12 @@ static void button_long_press_cb(void *arg, void *usr_data)
 static void button_single_click_cb(void *arg, void *usr_data)
 {
     printf("Single click\n");
-    is_command = false;
-    isMicOff = !isMicOff;
+    if(is_command){
+        is_command = false;
+    }
+    else{
+        isMicOff = !isMicOff;
+    }
     draw_status();
 }
 
@@ -1628,13 +1633,13 @@ void app_main()
 
     init_audio_stream_buffer();
     xTaskCreatePinnedToCore(oled_task, "oled", 4 * 1024, NULL, 5, NULL, 0);
-    xTaskCreatePinnedToCore(boot_sound, "bootSound", 4 * 1024, NULL, 5, NULL, 1);
+    xTaskCreatePinnedToCore(boot_sound, "bootSound", 3 * 1024, NULL, 5, NULL, 1);
     // esp_audio_play((int16_t*)m_1, sizeof(m_1), portMAX_DELAY);
     xTaskCreatePinnedToCore(&feed_Task, "feed", 8 * 1024, (void *)afe_data, 5, NULL, 0);
     xTaskCreatePinnedToCore(&detect_Task, "detect", 4 * 1024, (void *)afe_data, 5, NULL, 1);
     // xTaskCreatePinnedToCore(play_audio_task, "music", 4 * 1024, NULL, 5, NULL, 0);
     xTaskCreatePinnedToCore(decode_Task, "decode", 4 * 1024, NULL, 5, NULL, 0);
     xTaskCreatePinnedToCore(i2s_writer_task, "i2sWriter", 4 * 1024, NULL, 5, NULL, 0);
-    xTaskCreate(ping_task, "ping", 4 * 1024, NULL, 5, NULL);
-    xTaskCreate(led_control_task, "led_control", 4 * 1024, NULL, 5, NULL);
+    xTaskCreate(ping_task, "ping", 3 * 1024, NULL, 5, NULL);
+    xTaskCreate(led_control_task, "led_control", 3 * 1024, NULL, 5, NULL);
 }
