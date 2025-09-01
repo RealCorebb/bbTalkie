@@ -1,517 +1,327 @@
 <!DOCTYPE html>
-
 <html lang="en">
-
 <head>
-
   <meta charset="UTF-8">
-
-  <title>Image/GIF to SSD1327 4bpp C Array Exporter</title>
-
+  <title>Image/GIF/APNG to SSD1327 4bpp C Array Exporter</title>
   <style>
-
     body { background:#232323; color:#eee; font-family:sans-serif; }
-
     h1 { font-size:1.3em; }
-
     label {display:inline-block; width:9em;}
-
     #oledPreview { background:#222; border:2px solid #111; }
-
     textarea { width:99%; height:15em; font-family:monospace; margin-top:.7em;}
-
     #frameSel { font-size:80%; }
-
     .tiny { font-size:.8em; opacity:0.7; }
-
     .controls { margin-top:.8em; }
-
     button { margin:.1em .25em;}
-
   </style>
+  
+  <script type="module">
+    import upngJs from "https://cdn.skypack.dev/upng-js@2.1.0";
+    window.UPNG = upngJs;
+  </script>
 
 </head>
-
 <body>
-
-  <h1>Image/GIF to SSD1327 4bpp C Array Exporter</h1>
-
-  <label>Upload image/GIF:</label>
-
+  <h1>Image/GIF/APNG to SSD1327 4bpp C Array Exporter</h1>
+  <label>Upload image:</label>
   <input type="file" id="imgLoader" accept="image/*"><br>
-
   <label>Variable name:</label>
-
   <input type="text" id="cVarName" value="oled_img" style="width:10em;"><br>
-
   <label>W × H (px):</label>
-
   <input type="number" id="oledW" value="128" style="width:3em;">
-
   x <input type="number" id="oledH" value="128" style="width:3em;"><br>
-
   <label>Brightness γ:</label>
-
   <input type="range" id="gamma" min="70" max="160" value="100"> (<span id="gammaval">1.00</span>)<br>
-
   <label>Grayscale mode:</label>
-
   <select id="grayscaleMode" style="width:12em;">
-
     <option value="yellow" selected>Yellow channel only</option>
-
     <option value="luminance">Standard luminance</option>
-
   </select>
-
   <div class="controls">
-
     <span id="frameSel"></span>
-
   </div>
-
   <canvas id="oledPreview" width="128" height="128"></canvas>
-
   <div>
-
     <button id="toCbtn">Export C</button>
-
   </div>
-
   <textarea id="cout" readonly placeholder="C output will appear here..."></textarea>
-
   <div class="tiny">
-
     <b>How it works:</b><br>
-
-    - Upload PNG/JPG/BMP for single frame, or GIF for animation<br>
-
-    - Animated GIF is supported via omggif (all frames extracted in browser!)<br>
-
-    - W × H auto-fills to image/GIF size; change values to resize/crop (resampling/stretch).<br>
-
+    - Upload PNG/JPG/BMP for single frame, or GIF/APNG for animation<br>
+    - Animated GIF/APNG is supported via omggif/upng-js (all frames extracted in browser!)<br>
+    - W × H auto-fills to image size; change values to resize/crop (resampling/stretch).<br>
     - "Variable name" sets the exported C array name.<br>
-
     - "Yellow channel only" uses min(R,G) for yellow OLED optimization; "Standard luminance" uses Y=0.299R+0.587G+0.114B.<br>
-
     - Each frame: <code>[height][width/2]</code> packed (16 grayscale, 2 px per byte).<br>
-
   </div>
 
 <script src="https://cdn.jsdelivr.net/npm/omggif@1.0.10/omggif.min.js"></script>
-
 <script>
-
-let frames = []; // Each frame: {img: ImageData, dur: int} (dur ms, unused here)
-
+let frames = []; // Each frame: {img: ImageData, dur: int} (dur in ms)
 let curFrame = 0;
-
 const canvas = document.getElementById('oledPreview');
-
 const ctx = canvas.getContext('2d');
-
 let outW = 128, outH = 128;
 
-
-
 document.getElementById('oledW').oninput =
-
 document.getElementById('oledH').oninput =
-
   function() {
-
-    outW = parseInt(document.getElementById('oledW').value|0);
-
-    outH = parseInt(document.getElementById('oledH').value|0);
-
+    outW = parseInt(document.getElementById('oledW').value || 0);
+    outH = parseInt(document.getElementById('oledH').value || 0);
     canvas.width = outW; canvas.height = outH;
-
     previewFrame();
-
   };
 
-
-
 document.getElementById('gamma').oninput = function() {
-
   let g = document.getElementById('gamma').value;
-
   document.getElementById('gammaval').textContent = (g/100).toFixed(2);
-
   previewFrame();
-
 };
-
-
 
 document.getElementById('grayscaleMode').onchange = function() {
-
   previewFrame();
-
 };
 
-
-
 function showFrameSel() {
-
   let el = document.getElementById('frameSel');
-
-  if (frames.length<=1) { el.innerHTML = ""; return; }
-
+  if (frames.length <= 1) { el.innerHTML = ""; return; }
   let out = "";
-
-  for(let i=0;i<frames.length;++i)
-
-    out+=`<button onclick="curFrame=${i};previewFrame()" style="font-weight:${curFrame==i?'bold':'normal'};">${i+1}</button> `;
-
-  el.innerHTML = "Frame: "+out;
-
+  for(let i=0; i < frames.length; ++i)
+    out += `<button onclick="curFrame=${i};previewFrame()" style="font-weight:${curFrame==i?'bold':'normal'};">${i+1}</button> `;
+  el.innerHTML = "Frame: " + out;
 }
-
-
 
 function calculateGrayscale(r, g, b, mode) {
-
   if (mode === 'yellow') {
-
     // Yellow channel: min(R,G) - this represents how much yellow can be produced
-
     return Math.min(r, g) / 255;
-
   } else {
-
     // Standard luminance calculation
-
-    return (0.299*r + 0.587*g + 0.114*b) / 255;
-
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
   }
+}
 
+/**
+ * Helper function to update the UI after new frames have been decoded.
+ */
+function updateUIWithFrames(newFrames, width, height) {
+    frames = newFrames;
+    curFrame = 0;
+    document.getElementById('oledW').value = width;
+    document.getElementById('oledH').value = height;
+    outW = width;
+    outH = height;
+    canvas.width = outW;
+    canvas.height = outH;
+    showFrameSel();
+    previewFrame();
+}
+
+/**
+ * Helper function to load a single static image. Also serves as a fallback.
+ */
+function loadAsStaticImage(url) {
+    let img = new window.Image();
+    img.onload = () => {
+        const staticFrame = [{img: img, dur: 0}];
+        updateUIWithFrames(staticFrame, img.width, img.height);
+    };
+    img.onerror = () => {
+        alert("Could not load the image file.");
+    };
+    img.src = url;
 }
 
 
-
-// Load file (image or GIF), fill W/H auto, decode all GIF frames using omggif.
-
+// UPDATED: Main file loader logic to handle GIF, APNG, and static images.
 document.getElementById('imgLoader').onchange = function(e) {
-
-  let file = e.target.files[0];
-
+  const file = e.target.files[0];
   if (!file) return;
 
   const url = URL.createObjectURL(file);
-
   const ext = file.name.split('.').pop().toLowerCase();
 
-
-
-  if (ext === 'gif') {
-
-    // Load as arraybuffer for omggif
-
-    let reader = new FileReader();
-
+  // Handle formats that require ArrayBuffer parsing (GIF and PNG/APNG)
+  if (ext === 'gif' || ext === 'png') {
+    const reader = new FileReader();
     reader.onload = function(evt) {
+      const buffer = evt.target.result;
+      
+      // Handle GIFs with omggif
+      if (ext === 'gif') {
+        try {
+          const gif = new GifReader(new Uint8Array(buffer));
+          const w = gif.width, h = gif.height, n = gif.numFrames();
+          let decodedFrames = [];
+          
+          const tempCanvas = document.createElement('canvas');
+          tempCanvas.width = w; tempCanvas.height = h;
+          const tempCtx = tempCanvas.getContext('2d');
+          tempCtx.clearRect(0, 0, w, h);
 
-      let buffer = evt.target.result;
-
-      try {
-
-        let gif = new GifReader(new Uint8Array(buffer));
-
-        let w = gif.width, h = gif.height, n = gif.numFrames();
-
-        frames = [];
-
-        // Compose a canvas for GIF compositing (GIF frames may be partial/offset)
-
-        let can = document.createElement('canvas');
-
-        can.width = w; can.height = h;
-
-        let cctx = can.getContext('2d');
-
-        cctx.clearRect(0,0,w,h);
-
-        for (let i=0;i<n;++i) {
-
-          let frameImage = cctx.getImageData(0,0,w,h);
-
-          gif.decodeAndBlitFrameRGBA(i, frameImage.data);
-
-          cctx.putImageData(frameImage, 0, 0);
-
-          let copy = cctx.getImageData(0,0,w,h);
-
-          frames.push({img:copy, dur:gif.frameInfo(i).delay*10});
-
+          for (let i = 0; i < n; ++i) {
+            let frameImage = tempCtx.getImageData(0, 0, w, h);
+            gif.decodeAndBlitFrameRGBA(i, frameImage.data);
+            tempCtx.putImageData(frameImage, 0, 0);
+            let copy = tempCtx.getImageData(0, 0, w, h);
+            decodedFrames.push({img: copy, dur: gif.frameInfo(i).delay * 10});
+          }
+          updateUIWithFrames(decodedFrames, w, h);
+        } catch (exg) {
+          alert("GIF file decode error. It may be corrupt.");
         }
+      // Handle PNGs/APNGs with upng-js
+      } else if (ext === 'png') {
+        try {
+          if (typeof UPNG === 'undefined') {
+            alert("APNG library (upng.js) is not loaded. Please wait and try again.");
+            return;
+          }
+          const png = UPNG.decode(buffer);
+          const rgbaFrames = UPNG.toRGBA8(png);
+          const w = png.width, h = png.height;
+          let decodedFrames = [];
 
-        curFrame = 0;
-
-        document.getElementById('oledW').value = w;
-
-        document.getElementById('oledH').value = h;
-
-        outW = w; outH = h;
-
-        canvas.width = outW; canvas.height = outH;
-
-        showFrameSel();
-
-        previewFrame();
-
-      } catch (exg) {
-
-        alert("GIF file decode error.");
-
+          for (let i = 0; i < rgbaFrames.length; i++) {
+            const frameData = new Uint8ClampedArray(rgbaFrames[i]);
+            const imageData = new ImageData(frameData, w, h);
+            decodedFrames.push({img: imageData, dur: png.frames[i].delay});
+          }
+          // This handles both static (1 frame) and animated PNGs
+          updateUIWithFrames(decodedFrames, w, h);
+        } catch (exp) {
+          console.error("PNG/APNG decode error:", exp);
+          alert("Could not decode PNG. It might be corrupt. Attempting to load as a static image.");
+          loadAsStaticImage(url); // Fallback for non-animated or problematic PNGs
+        }
       }
-
     };
-
     reader.readAsArrayBuffer(file);
-
-    return;
-
+  } else {
+    // Handle other static image formats (JPG, BMP, etc.)
+    loadAsStaticImage(url);
   }
-
-
-
-  // Non-GIF images: load first frame only ("animation" not supported)
-
-  let img = new window.Image();
-
-  img.onload = ()=> {
-
-    frames = [{img:img, dur:0}]; 
-
-    curFrame=0;
-
-    document.getElementById('oledW').value = img.width;
-
-    document.getElementById('oledH').value = img.height;
-
-    outW = img.width;
-
-    outH = img.height;
-
-    canvas.width = outW; canvas.height = outH;
-
-    showFrameSel();
-
-    previewFrame();
-
-  };
-
-  img.src=url;
-
-}
-
+};
 
 
 window.previewFrame = function() {
-
-  ctx.fillStyle="#222"; ctx.fillRect(0,0,canvas.width,canvas.height);
-
+  ctx.fillStyle = "#222"; ctx.fillRect(0, 0, canvas.width, canvas.height);
   if (!frames.length) return;
+  
+  const g = document.getElementById('gamma').value / 100;
+  const mode = document.getElementById('grayscaleMode').value;
+  const frame = frames[curFrame];
+  const img = frame.img;
+  const isData = (img instanceof ImageData);
 
-  let g = document.getElementById('gamma').value/100;
-
-  let mode = document.getElementById('grayscaleMode').value;
-
-  let frame = frames[curFrame], img = frame.img, isData = (img instanceof ImageData);
-
-
-
-  let tmpC = document.createElement('canvas');
-
-  tmpC.width = outW; tmpC.height= outH;
-
-  let tctx = tmpC.getContext('2d');
-
+  // Use a temporary canvas to draw the source image at the target size
+  const tmpC = document.createElement('canvas');
+  tmpC.width = outW; tmpC.height = outH;
+  const tctx = tmpC.getContext('2d');
+  
   if (isData) {
-
-    tctx.putImageData(img,0,0);
-
-    if (img.width!==outW || img.height!==outH)
-
-      tctx.drawImage(tmpC, 0,0,img.width,img.height,0,0,outW,outH); // rescale
-
+    // For ImageData, we may need to resize it. Draw to a temp canvas first.
+    const tempImgCanvas = document.createElement('canvas');
+    tempImgCanvas.width = img.width; tempImgCanvas.height = img.height;
+    tempImgCanvas.getContext('2d').putImageData(img, 0, 0);
+    tctx.drawImage(tempImgCanvas, 0, 0, img.width, img.height, 0, 0, outW, outH);
   } else {
-
-    tctx.drawImage(img, 0,0, img.width, img.height, 0,0,outW,outH);
-
+    // For Image elements, drawImage handles resizing directly.
+    tctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, outW, outH);
   }
+  
+  const idat = tctx.getImageData(0, 0, outW, outH);
+  const d = idat.data;
+  const oimg = ctx.createImageData(outW, outH);
+  const odata = oimg.data;
 
-  let idat = tctx.getImageData(0,0,outW,outH);
-
-  let d = idat.data;
-
-  let oimg = ctx.getImageData(0,0,outW,outH);
-
-  let odata = oimg.data;
-
-  for(let i=0; i<outW*outH; ++i) {
-
-    let r=d[i*4],g_=d[i*4+1],b=d[i*4+2],a=d[i*4+3];
-
+  for (let i = 0; i < outW * outH; ++i) {
+    const r = d[i * 4], g_ = d[i * 4 + 1], b = d[i * 4 + 2], a = d[i * 4 + 3];
     let y = calculateGrayscale(r, g_, b, mode);
-
     y = Math.pow(y, g);
-
-    let gray = Math.round(y*15);
-
-    let px = Math.round(gray*255/15);
-
-    px = a<128 ? 34 : px;
-
-    // Yellow OLED preview! (pure yellow)
-
-    odata[i*4+0]=px; // Red
-
-    odata[i*4+1]=px; // Green
-
-    odata[i*4+2]=0;  // Blue
-
-    odata[i*4+3]=255;
-
+    let gray = Math.round(y * 15);
+    let px = Math.round(gray * 255 / 15);
+    px = a < 128 ? 34 : px; // Show transparent areas as dark gray
+    // Yellow OLED preview (R=G, B=0)
+    odata[i * 4 + 0] = px; // Red
+    odata[i * 4 + 1] = px; // Green
+    odata[i * 4 + 2] = 0;  // Blue
+    odata[i * 4 + 3] = 255;
   }
-
-  ctx.putImageData(oimg,0,0);
-
+  ctx.putImageData(oimg, 0, 0);
 }
 
-
-
 document.getElementById('toCbtn').onclick = function() {
-
   if (!frames.length) { alert("No image loaded."); return; }
-
-  let nFrames = frames.length;
-
-  let arrname = document.getElementById('cVarName').value.replace(/[^a-zA-Z0-9_]/g,'_') || "oled_img";
-
-  let W = parseInt(document.getElementById('oledW').value|0);
-
-  let H = parseInt(document.getElementById('oledH').value|0);
-
-  let gamma = document.getElementById('gamma').value/100;
-
-  let mode = document.getElementById('grayscaleMode').value;
-
-
+  
+  const nFrames = frames.length;
+  const arrname = document.getElementById('cVarName').value.replace(/[^a-zA-Z0-9_]/g, '_') || "oled_img";
+  const W = parseInt(document.getElementById('oledW').value || 0);
+  const H = parseInt(document.getElementById('oledH').value || 0);
+  const gamma = document.getElementById('gamma').value / 100;
+  const mode = document.getElementById('grayscaleMode').value;
+  const W_bytes = Math.ceil(W / 2);
 
   let c = '';
+  c += `// SSD1327 4bpp (16 grayscale) export\n`;
+  c += `// size: ${W}x${H}${nFrames>1?`, frames:${nFrames}`:''}\n`;
+  c += `// grayscale mode: ${mode === 'yellow' ? 'yellow channel (min(R,G))' : 'standard luminance'}\n`;
 
-  c+= `// SSD1327 4bpp (16 grayscale) export\n`;
-
-  c+= `// size: ${W}x${H}${nFrames>1?`, frames:${nFrames}`:''}\n`;
-
-  c+= `// grayscale mode: ${mode === 'yellow' ? 'yellow channel (min(R,G))' : 'standard luminance'}\n`;
-
-  //c+= `#define IMG_WIDTH  ${W}\n#define IMG_HEIGHT ${H}\n`;
-
-
-
-  if(nFrames>1)
-
-    c+= `const uint8_t ${arrname}[${nFrames}][${H}][${Math.ceil(W/2)}] = {\n`;
-
+  if (nFrames > 1)
+    c += `const uint8_t ${arrname}[${nFrames}][${H}][${W_bytes}] = {\n`;
   else
+    c += `const uint8_t ${arrname}[${H}][${W_bytes}] = {\n`;
 
-    c+= `const uint8_t ${arrname}[${H}][${Math.ceil(W/2)}] = {\n`;
+  for (let f = 0; f < nFrames; ++f) {
+    if (nFrames > 1) c += `  {\n`;
+    
+    const img = frames[f].img;
+    const isData = (img instanceof ImageData);
 
-
-
-  for(let f=0;f<nFrames;++f){
-
-    if (nFrames>1) c+=`  {\n`;
-
-    let img = frames[f].img, isData = (img instanceof ImageData);
-
-
-
-    // Get bitmap at expected size
-
-    let tmpC = document.createElement('canvas');
-
-    tmpC.width=W;tmpC.height=H;
-
-    let tctx = tmpC.getContext('2d');
-
+    // Get bitmap at the target export size
+    const tmpC = document.createElement('canvas');
+    tmpC.width = W; tmpC.height = H;
+    const tctx = tmpC.getContext('2d');
     if (isData) {
-
-      tctx.putImageData(img,0,0);
-
-      if (img.width!==W || img.height!==H)
-
-        tctx.drawImage(tmpC, 0,0,img.width,img.height,0,0,W,H);
-
+        const tempImgCanvas = document.createElement('canvas');
+        tempImgCanvas.width = img.width; tempImgCanvas.height = img.height;
+        tempImgCanvas.getContext('2d').putImageData(img, 0, 0);
+        tctx.drawImage(tempImgCanvas, 0, 0, img.width, img.height, 0, 0, W, H);
     } else {
-
-      tctx.drawImage(img,0,0,img.width,img.height,0,0,W,H);
-
+        tctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, W, H);
     }
+    const idat = tctx.getImageData(0, 0, W, H).data;
 
-    let idat = tctx.getImageData(0,0,W,H).data;
-
-    for(let y=0;y<H;++y) {
-
-      c += "    {";
-
-      for (let x=0;x<W;x+=2) {
-
-        let i1 = (y*W + x)*4;
-
-        let i2 = (y*W + x+1)*4;
-
+    for (let y = 0; y < H; ++y) {
+      c += (nFrames > 1) ? "    {" : "  {";
+      for (let x = 0; x < W; x += 2) {
+        const i1 = (y * W + x) * 4;
+        const i2 = (y * W + x + 1) * 4;
+        
         function getGray(i) {
-
-          let r=idat[i],g_=idat[i+1],b=idat[i+2],a=idat[i+3];
-
+          const r = idat[i], g_ = idat[i + 1], b = idat[i + 2], a = idat[i + 3];
           let yy = calculateGrayscale(r, g_, b, mode);
-
-          yy=Math.pow(yy,gamma);
-
-          let g4 = Math.round(yy*15);
-
-          return a<128?0:g4;
-
+          yy = Math.pow(yy, gamma);
+          let g4 = Math.round(yy * 15);
+          return a < 128 ? 0 : g4; // Treat transparent as black
         }
-
+        
         let g1 = getGray(i1);
-
-        let g2 = (x+1<W)?getGray(i2):0;
-
-        let packed = (g1<<4)|g2;
-
-        c+="0x"+packed.toString(16).padStart(2,'0');
-
-        if (x+2<W) c+=",";
-
+        let g2 = (x + 1 < W) ? getGray(i2) : 0;
+        let packed = (g1 << 4) | g2;
+        c += "0x" + packed.toString(16).padStart(2, '0');
+        if (x + 2 < W) c += ",";
       }
-
-      c+="}";
-
-      if (y+1<H) c+=",";
-
-      c+="\n";
-
+      c += "}";
+      if (y + 1 < H) c += ",";
+      c += "\n";
     }
-
-    if (nFrames>1) c+="  }"+(f+1<nFrames?",\n":"\n");
-
+    if (nFrames > 1) c += "  }" + (f + 1 < nFrames ? ",\n" : "\n");
   }
-
-  c+="};\n";
-
-  c+= `// ${nFrames>1?"[frame][row][col/2]":"[row][col/2]"}, unpack 2 px/byte: hi nibble=left, lo=right, grayscale 0..15\n`;
-
+  c += "};\n";
+  c += `// ${nFrames>1?"[frame][row][col/2]":"[row][col/2]"}, unpack 2 px/byte: hi nibble=left, lo=right, grayscale 0..15\n`;
   document.getElementById('cout').value = c;
-
 };
-
 </script>
-
 </body>
-
 </html>

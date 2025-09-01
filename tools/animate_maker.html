@@ -1,0 +1,997 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>动画PNG制作器</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #000000;
+            min-height: 100vh;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+        
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+        
+        .main-content {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        
+        .upload-section {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .upload-area {
+            border: 3px dashed #ddd;
+            border-radius: 10px;
+            padding: 40px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: #fafafa;
+        }
+        
+        .upload-area:hover {
+            border-color: #667eea;
+            background: #f0f4ff;
+        }
+        
+        .upload-area.dragover {
+            border-color: #667eea;
+            background: #e8f0ff;
+        }
+        
+        .upload-icon {
+            font-size: 3rem;
+            margin-bottom: 15px;
+            color: #999;
+        }
+        
+        .upload-text {
+            font-size: 1.1rem;
+            color: #666;
+            margin-bottom: 15px;
+        }
+        
+        .file-input {
+            display: none;
+        }
+        
+        .upload-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: background 0.3s ease;
+        }
+        
+        .upload-btn:hover {
+            background: #5a6fd8;
+        }
+        
+        .preview-section {
+            display: none;
+            margin-bottom: 30px;
+        }
+        
+        .preview-container {
+            display: flex;
+            gap: 30px;
+            align-items: flex-start;
+        }
+        
+        .original-preview, .animated-preview {
+            flex: 1;
+            text-align: center;
+        }
+        
+        .preview-title {
+            font-size: 1.2rem;
+            margin-bottom: 15px;
+            color: #333;
+            font-weight: 500;
+        }
+        
+        .preview-image {
+            max-width: 100%;
+            max-height: 300px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        
+        .animation-controls {
+            display: none;
+            margin-bottom: 30px;
+        }
+        
+        .controls-title {
+            font-size: 1.3rem;
+            margin-bottom: 20px;
+            color: #333;
+            font-weight: 500;
+        }
+        
+        .animations-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .animation-option {
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.3s ease;
+            background: white;
+        }
+        
+        .animation-option:hover {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+        
+        .animation-option.active {
+            border-color: #667eea;
+            background: #e8f0ff;
+        }
+        
+        .animation-name {
+            font-weight: 500;
+            margin-bottom: 5px;
+        }
+        
+        .animation-desc {
+            font-size: 0.9rem;
+            color: #666;
+        }
+        
+        .animation-controls-section {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .animation-controls-title {
+            font-size: 1.1rem;
+            margin-bottom: 15px;
+            color: #333;
+            font-weight: 500;
+        }
+        
+        .animation-params {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        
+        .param-group {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .param-label {
+            font-size: 0.9rem;
+            margin-bottom: 5px;
+            color: #555;
+            font-weight: 500;
+        }
+        
+        .param-input {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+        
+        .param-range {
+            margin-bottom: 5px;
+        }
+        
+        .param-value {
+            text-align: center;
+            font-size: 0.8rem;
+            color: #666;
+        }
+        
+        .settings-section {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .setting-group {
+            flex: 1;
+            min-width: 150px;
+        }
+        
+        .setting-label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: #333;
+        }
+        
+        .setting-input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 1rem;
+        }
+        
+        .export-section {
+            display: none;
+            text-align: center;
+        }
+        
+        .export-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1.1rem;
+            font-weight: 500;
+            transition: background 0.3s ease;
+            margin-right: 15px;
+        }
+        
+        .export-btn:hover {
+            background: #218838;
+        }
+        
+        .reset-btn {
+            background: #6c757d;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1.1rem;
+            font-weight: 500;
+            transition: background 0.3s ease;
+        }
+        
+        .reset-btn:hover {
+            background: #5a6268;
+        }
+        
+        .animated-preview-container {
+            position: relative;
+            display: inline-block;
+        }
+        
+        @media (max-width: 768px) {
+            .preview-container {
+                flex-direction: column;
+            }
+            
+            .settings-section {
+                flex-direction: column;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎬 动画PNG制作器</h1>
+            <p>上传静态图片，选择动画效果，导出APNG</p>
+        </div>
+        
+        <div class="main-content">
+            <!-- 上传区域 -->
+            <div class="upload-section">
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-icon">📁</div>
+                    <div class="upload-text">拖拽图片到这里或点击上传</div>
+                    <button class="upload-btn" onclick="document.getElementById('fileInput').click()">选择图片</button>
+                    <input type="file" id="fileInput" class="file-input" accept="image/*">
+                </div>
+            </div>
+            
+            <!-- 预览区域 -->
+            <div class="preview-section" id="previewSection">
+                <div class="preview-container">
+                    <div class="original-preview">
+                        <div class="preview-title">原始图片</div>
+                        <img id="originalImage" class="preview-image">
+                    </div>
+                    <div class="animated-preview">
+                        <div class="preview-title">动画预览</div>
+                        <div class="animated-preview-container">
+                            <img id="animatedImage" class="preview-image">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 动画控制 -->
+            <div class="animation-controls" id="animationControls">
+                <div class="controls-title">选择动画效果</div>
+                <div class="animations-grid">
+                    <div class="animation-option active" data-animation="fade">
+                        <div class="animation-name">淡入淡出</div>
+                        <div class="animation-desc">透明度变化</div>
+                    </div>
+                    <div class="animation-option" data-animation="pulse">
+                        <div class="animation-name">脉冲</div>
+                        <div class="animation-desc">大小律动</div>
+                    </div>
+                    <div class="animation-option" data-animation="rotation">
+                        <div class="animation-name">旋转</div>
+                        <div class="animation-desc">360度旋转</div>
+                    </div>
+                    <div class="animation-option" data-animation="bounce">
+                        <div class="animation-name">弹跳</div>
+                        <div class="animation-desc">上下弹跳</div>
+                    </div>
+                    <div class="animation-option" data-animation="shake">
+                        <div class="animation-name">摇摆</div>
+                        <div class="animation-desc">左右摇摆</div>
+                    </div>
+                    <div class="animation-option" data-animation="swing">
+                        <div class="animation-name">摆动</div>
+                        <div class="animation-desc">钟摆效果</div>
+                    </div>
+                    <div class="animation-option" data-animation="zoom">
+                        <div class="animation-name">缩放</div>
+                        <div class="animation-desc">放大缩小</div>
+                    </div>
+                    <div class="animation-option" data-animation="flip">
+                        <div class="animation-name">翻转</div>
+                        <div class="animation-desc">3D翻转</div>
+                    </div>
+                </div>
+                
+                <!-- 动画参数控制 -->
+                <div class="animation-controls-section">
+                    <div class="animation-controls-title">动画参数调节</div>
+                    <div class="animation-params" id="animationParams">
+                        <!-- 参数控件将在这里动态生成 -->
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <div class="setting-group">
+                        <label class="setting-label" for="fps">帧率 (FPS)</label>
+                        <select id="fps" class="setting-input">
+                            <option value="10">10 FPS</option>
+                            <option value="15">15 FPS</option>
+                            <option value="20">20 FPS</option>
+                            <option value="30" selected>30 FPS</option>
+                        </select>
+                    </div>
+                    <div class="setting-group">
+                        <label class="setting-label" for="duration">动画时长 (秒)</label>
+                        <input type="number" id="duration" class="setting-input" value="1" min="0.5" max="10" step="0.5">
+                    </div>
+                    <div class="setting-group">
+                        <label class="setting-label" for="quality">图片质量</label>
+                        <select id="quality" class="setting-input">
+                            <option value="0.8">高质量</option>
+                            <option value="0.6" selected>中等质量</option>
+                            <option value="0.4">低质量</option>
+                        </select>
+                    </div>
+                    <div class="setting-group">
+                        <label class="setting-label" for="size">输出尺寸</label>
+                        <select id="size" class="setting-input">
+                            <option value="original">原始尺寸</option>
+                            <option value="512">512px</option>
+                            <option value="256">256px</option>
+                            <option value="100" selected>100px</option>
+                            <option value="128">128px</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 导出区域 -->
+            <div class="export-section" id="exportSection">
+                <button class="export-btn" id="exportBtn">📥 导出PNG</button>
+                <button class="reset-btn" id="resetBtn">🔄 重新开始</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import upngJs from "https://cdn.skypack.dev/upng-js@2.1.0";
+        window.UPNG = upngJs;
+    </script>
+    <script>
+        let uploadedImage = null;
+        let currentAnimation = 'fade';
+        let animationParams = {};
+        
+        // 动画参数配置
+        const animationConfigs = {
+            fade: {
+                intensity: { label: '强度', min: 0.1, max: 1, default: 0.7, step: 0.1 },
+                minOpacity: { label: '最小透明度', min: 0, max: 0.8, default: 0.3, step: 0.1 }
+            },
+            pulse: {
+                intensity: { label: '强度', min: 0.05, max: 0.5, default: 0.1, step: 0.02 },
+                baseScale: { label: '基础大小', min: 0.5, max: 1.2, default: 0.9, step: 0.05 }
+            },
+            rotation: {
+                speed: { label: '旋转速度', min: 0.5, max: 3, default: 1, step: 0.5 },
+                direction: { label: '方向', type: 'select', options: [{ value: 1, label: '顺时针' }, { value: -1, label: '逆时针' }], default: 1 }
+            },
+            bounce: {
+                height: { label: '弹跳高度', min: 10, max: 50, default: 20, step: 5 },
+                easing: { label: '缓动类型', type: 'select', options: [{ value: 'sin', label: '正弦' }, { value: 'bounce', label: '弹性' }], default: 'sin' }
+            },
+            shake: {
+                intensity: { label: '摇摆强度', min: 5, max: 30, default: 10, step: 5 },
+                frequency: { label: '频率', min: 2, max: 10, default: 8, step: 1 }
+            },
+            swing: {
+                angle: { label: '摆动角度', min: 5, max: 45, default: 15, step: 5 },
+                scale: { label: '缩放比例', min: 0.6, max: 1.0, default: 0.8, step: 0.05 },
+                easing: { label: '缓动', type: 'select', options: [{ value: 'sin', label: '正弦' }, { value: 'ease', label: '缓动' }], default: 'sin' }
+            },
+            zoom: {
+                intensity: { label: '缩放强度', min: 0.1, max: 0.8, default: 0.2, step: 0.1 },
+                baseScale: { label: '基础大小', min: 0.8, max: 1.2, default: 1, step: 0.1 }
+            },
+            flip: {
+                axis: { label: '翻转轴', type: 'select', options: [{ value: 'Y', label: '垂直翻转' }, { value: 'X', label: '水平翻转' }], default: 'Y' },
+                speed: { label: '翻转速度', min: 0.5, max: 2, default: 1, step: 0.5 }
+            }
+        };
+        
+        // DOM 元素
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const previewSection = document.getElementById('previewSection');
+        const animationControls = document.getElementById('animationControls');
+        const exportSection = document.getElementById('exportSection');
+        const originalImage = document.getElementById('originalImage');
+        const animatedImage = document.getElementById('animatedImage');
+        const exportBtn = document.getElementById('exportBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const durationInput = document.getElementById('duration');
+        const qualitySelect = document.getElementById('quality');
+        const fpsSelect = document.getElementById('fps');
+        const sizeSelect = document.getElementById('size');
+        const animationParamsContainer = document.getElementById('animationParams');
+        
+        // 初始化动画参数
+        function initAnimationParams() {
+            for (const [animType, config] of Object.entries(animationConfigs)) {
+                animationParams[animType] = {};
+                for (const [paramName, paramConfig] of Object.entries(config)) {
+                    animationParams[animType][paramName] = paramConfig.default;
+                }
+            }
+        }
+        
+        // 生成参数控制界面
+        function generateParamControls(animationType) {
+            animationParamsContainer.innerHTML = '';
+            const config = animationConfigs[animationType];
+            
+            for (const [paramName, paramConfig] of Object.entries(config)) {
+                const paramGroup = document.createElement('div');
+                paramGroup.className = 'param-group';
+                
+                const label = document.createElement('div');
+                label.className = 'param-label';
+                label.textContent = paramConfig.label;
+                paramGroup.appendChild(label);
+                
+                if (paramConfig.type === 'select') {
+                    const select = document.createElement('select');
+                    select.className = 'param-input';
+                    select.id = `param-${paramName}`;
+                    
+                    paramConfig.options.forEach(option => {
+                        const optionElement = document.createElement('option');
+                        optionElement.value = option.value;
+                        optionElement.textContent = option.label;
+                        if (option.value === paramConfig.default) {
+                            optionElement.selected = true;
+                        }
+                        select.appendChild(optionElement);
+                    });
+                    
+                    select.addEventListener('change', (e) => {
+                        animationParams[animationType][paramName] = paramConfig.options.find(opt => opt.value == e.target.value).value;
+                        applyAnimation(animationType);
+                    });
+                    
+                    paramGroup.appendChild(select);
+                } else {
+                    const range = document.createElement('input');
+                    range.type = 'range';
+                    range.className = 'param-input param-range';
+                    range.min = paramConfig.min;
+                    range.max = paramConfig.max;
+                    range.step = paramConfig.step;
+                    range.value = paramConfig.default;
+                    range.id = `param-${paramName}`;
+                    
+                    const valueDisplay = document.createElement('div');
+                    valueDisplay.className = 'param-value';
+                    valueDisplay.textContent = paramConfig.default;
+                    
+                    range.addEventListener('input', (e) => {
+                        const value = parseFloat(e.target.value);
+                        animationParams[animationType][paramName] = value;
+                        valueDisplay.textContent = value;
+                        applyAnimation(animationType);
+                    });
+                    
+                    paramGroup.appendChild(range);
+                    paramGroup.appendChild(valueDisplay);
+                }
+                
+                animationParamsContainer.appendChild(paramGroup);
+            }
+        }
+        
+        // 拖拽上传
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+        
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFileUpload(files[0]);
+            }
+        });
+        
+        uploadArea.addEventListener('click', () => {
+            fileInput.click();
+        });
+        
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFileUpload(e.target.files[0]);
+            }
+        });
+        
+        // 处理文件上传
+        function handleFileUpload(file) {
+            if (!file.type.startsWith('image/')) {
+                alert('请上传图片文件！');
+                return;
+            }
+            
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                uploadedImage = e.target.result;
+                originalImage.src = uploadedImage;
+                animatedImage.src = uploadedImage;
+                
+                // 显示预览和控制面板
+                previewSection.style.display = 'block';
+                animationControls.style.display = 'block';
+                exportSection.style.display = 'block';
+                
+                // 生成参数控制界面
+                generateParamControls(currentAnimation);
+                
+                // 应用默认动画
+                applyAnimation(currentAnimation);
+            };
+            reader.readAsDataURL(file);
+        }
+        
+        // 动画选择
+        document.querySelectorAll('.animation-option').forEach(option => {
+            option.addEventListener('click', () => {
+                // 移除所有活动状态
+                document.querySelectorAll('.animation-option').forEach(opt => {
+                    opt.classList.remove('active');
+                });
+                
+                // 添加活动状态
+                option.classList.add('active');
+                
+                // 获取动画类型
+                currentAnimation = option.dataset.animation;
+                
+                // 生成参数控制界面
+                generateParamControls(currentAnimation);
+                
+                applyAnimation(currentAnimation);
+            });
+        });
+        
+        // 应用动画
+        function applyAnimation(animationType) {
+            // 移除所有动画类
+            animatedImage.className = 'preview-image';
+            
+            // 获取当前动画参数
+            const params = animationParams[animationType] || {};
+            const duration = durationInput.value + 's';
+            
+            // 创建动态CSS动画
+            const styleId = 'dynamic-animation';
+            let styleElement = document.getElementById(styleId);
+            if (styleElement) {
+                styleElement.remove();
+            }
+            
+            styleElement = document.createElement('style');
+            styleElement.id = styleId;
+            
+            let keyframes = '';
+            let animationCSS = '';
+            
+            switch (animationType) {
+                case 'fade':
+                    const minOpacity = params.minOpacity || 0.3;
+                    const intensity = params.intensity || 0.7;
+                    keyframes = `
+                        @keyframes dynamic-fade {
+                            0%, 100% { opacity: 1; }
+                            50% { opacity: ${minOpacity + (1 - minOpacity) * (1 - intensity)}; }
+                        }
+                    `;
+                    animationCSS = `animation: dynamic-fade ${duration} infinite;`;
+                    break;
+                    
+                case 'pulse':
+                    const baseScale = params.baseScale || 0.9;
+                    const pulseIntensity = params.intensity || 0.1;
+                    keyframes = `
+                        @keyframes dynamic-pulse {
+                            0%, 100% { transform: scale(${baseScale}); }
+                            50% { transform: scale(${baseScale + pulseIntensity}); }
+                        }
+                    `;
+                    animationCSS = `animation: dynamic-pulse ${duration} infinite;`;
+                    break;
+                    
+                case 'rotation':
+                    const speed = params.speed || 1;
+                    const direction = params.direction || 1;
+                    const rotationDuration = parseFloat(durationInput.value) / speed;
+                    keyframes = `
+                        @keyframes dynamic-rotation {
+                            0% { transform: rotate(0deg); }
+                            100% { transform: rotate(${360 * direction}deg); }
+                        }
+                    `;
+                    animationCSS = `animation: dynamic-rotation ${rotationDuration}s linear infinite;`;
+                    break;
+                    
+                case 'bounce':
+                    const height = params.height || 20;
+                    const easing = params.easing || 'sin';
+                    if (easing === 'bounce') {
+                        keyframes = `
+                            @keyframes dynamic-bounce {
+                                0%, 100% { transform: translateY(0); }
+                                25% { transform: translateY(-${height * 0.8}px); }
+                                50% { transform: translateY(-${height}px); }
+                                75% { transform: translateY(-${height * 0.4}px); }
+                            }
+                        `;
+                    } else {
+                        keyframes = `
+                            @keyframes dynamic-bounce {
+                                0%, 100% { transform: translateY(0); }
+                                50% { transform: translateY(-${height}px); }
+                            }
+                        `;
+                    }
+                    animationCSS = `animation: dynamic-bounce ${duration} infinite;`;
+                    break;
+                    
+                case 'shake':
+                    const shakeIntensity = params.intensity || 10;
+                    const frequency = params.frequency || 8;
+                    keyframes = `
+                        @keyframes dynamic-shake {
+                            0%, 100% { transform: translateX(0); }
+                    `;
+                    for (let i = 1; i < frequency; i++) {
+                        const percent = (i / frequency) * 100;
+                        const offset = (i % 2 === 1 ? shakeIntensity : -shakeIntensity) * Math.sin(i * Math.PI / frequency);
+                        keyframes += `${percent}% { transform: translateX(${offset}px); }\n`;
+                    }
+                    keyframes += '}';
+                    animationCSS = `animation: dynamic-shake ${duration} infinite;`;
+                    break;
+                    
+                case 'swing':
+                    const angle = params.angle || 15;
+                    const scale = params.scale || 0.8;
+                    keyframes = `
+                        @keyframes dynamic-swing {
+                            0%, 100% { transform: scale(${scale}) rotate(0deg); }
+                            25% { transform: scale(${scale}) rotate(${angle}deg); }
+                            75% { transform: scale(${scale}) rotate(-${angle}deg); }
+                        }
+                    `;
+                    animationCSS = `animation: dynamic-swing ${duration} infinite; transform-origin: center center;`;
+                    break;
+                    
+                case 'zoom':
+                    const zoomBase = params.baseScale || 1;
+                    const zoomIntensity = params.intensity || 0.2;
+                    keyframes = `
+                        @keyframes dynamic-zoom {
+                            0%, 100% { transform: scale(${zoomBase}); }
+                            50% { transform: scale(${zoomBase + zoomIntensity}); }
+                        }
+                    `;
+                    animationCSS = `animation: dynamic-zoom ${duration} infinite;`;
+                    break;
+                    
+                case 'flip':
+                    const axis = params.axis || 'Y';
+                    const flipSpeed = params.speed || 1;
+                    const flipDuration = parseFloat(durationInput.value) / flipSpeed;
+                    keyframes = `
+                        @keyframes dynamic-flip {
+                            0% { transform: rotate${axis}(0); }
+                            50% { transform: rotate${axis}(180deg); }
+                            100% { transform: rotate${axis}(360deg); }
+                        }
+                    `;
+                    animationCSS = `animation: dynamic-flip ${flipDuration}s infinite;`;
+                    break;
+            }
+            
+            styleElement.textContent = keyframes + `.dynamic-animation { ${animationCSS} }`;
+            document.head.appendChild(styleElement);
+            
+            // 应用动画类
+            animatedImage.classList.add('dynamic-animation');
+        }
+        
+        // 监听设置变化
+        durationInput.addEventListener('input', () => {
+            applyAnimation(currentAnimation);
+        });
+        
+        // 导出APNG
+        exportBtn.addEventListener('click', () => {
+            if (!uploadedImage) {
+                alert('请先上传图片！');
+                return;
+            }
+            
+            exportBtn.textContent = '🔄 生成中...';
+            exportBtn.disabled = true;
+            
+            // 创建动画PNG
+            createAnimatedPNG();
+        });
+        
+        function createAnimatedPNG() {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+            
+            img.onload = () => {
+                // 设置画布尺寸
+                const sizeValue = sizeSelect.value;
+                let canvasSize = 100;
+                
+                if (sizeValue === 'original') {
+                    canvasSize = Math.min(img.width, img.height, 512);
+                } else {
+                    canvasSize = parseInt(sizeValue);
+                }
+                
+                canvas.width = canvasSize;
+                canvas.height = canvasSize;
+                
+                const duration = parseFloat(durationInput.value) * 1000;
+                const fps = parseInt(fpsSelect.value);
+                const frames = fps * parseFloat(durationInput.value);
+                const frameDelay = Math.round(1000 / fps);
+                
+                const frameData = [];
+                const delays = [];
+                const params = animationParams[currentAnimation] || {};
+                
+                // 生成动画帧
+                for (let i = 0; i < frames; i++) {
+                    ctx.clearRect(0, 0, canvasSize, canvasSize);
+                    // 设置黑色背景
+                    ctx.fillStyle = '#000000';
+                    ctx.fillRect(0, 0, canvasSize, canvasSize);
+                    ctx.save();
+                    
+                    const progress = i / frames;
+                    const centerX = canvasSize / 2;
+                    const centerY = canvasSize / 2;
+                    
+                    // 应用动画变换（使用参数）
+                    switch (currentAnimation) {
+                        case 'fade':
+                            const minOpacity = params.minOpacity || 0.3;
+                            const intensity = params.intensity || 0.7;
+                            ctx.globalAlpha = minOpacity + (1 - minOpacity) * (0.5 + 0.5 * Math.cos(progress * Math.PI * 2) * intensity);
+                            break;
+                        case 'pulse':
+                            const baseScale = params.baseScale || 0.9;
+                            const pulseIntensity = params.intensity || 0.1;
+                            const scale = baseScale + pulseIntensity * Math.sin(progress * Math.PI * 2);
+                            ctx.translate(centerX, centerY);
+                            ctx.scale(scale, scale);
+                            ctx.translate(-centerX, -centerY);
+                            break;
+                        case 'rotation':
+                            const direction = params.direction || 1;
+                            ctx.translate(centerX, centerY);
+                            ctx.rotate(progress * Math.PI * 2 * direction);
+                            ctx.translate(-centerX, -centerY);
+                            break;
+                        case 'bounce':
+                            const height = params.height || 20;
+                            const bounceY = -height * Math.abs(Math.sin(progress * Math.PI * 2));
+                            ctx.translate(0, bounceY);
+                            break;
+                        case 'shake':
+                            const shakeIntensity = params.intensity || 10;
+                            const frequency = params.frequency || 8;
+                            const shakeX = shakeIntensity * Math.sin(progress * Math.PI * frequency);
+                            ctx.translate(shakeX, 0);
+                            break;
+                        case 'swing':
+                            const angle = (params.angle || 15) * Math.PI / 180;
+                            const swingScale = params.scale || 0.8;
+                            const swingAngle = angle * Math.sin(progress * Math.PI * 2);
+                            ctx.translate(centerX, centerY);
+                            ctx.scale(swingScale, swingScale);
+                            ctx.rotate(swingAngle);
+                            ctx.translate(-centerX, -centerY);
+                            break;
+                        case 'zoom':
+                            const zoomBase = params.baseScale || 1;
+                            const zoomIntensity = params.intensity || 0.2;
+                            const zoomScale = zoomBase + zoomIntensity * Math.sin(progress * Math.PI * 2);
+                            ctx.translate(centerX, centerY);
+                            ctx.scale(zoomScale, zoomScale);
+                            ctx.translate(-centerX, -centerY);
+                            break;
+                        case 'flip':
+                            const axis = params.axis || 'Y';
+                            ctx.translate(centerX, centerY);
+                            if (axis === 'Y') {
+                                ctx.scale(Math.cos(progress * Math.PI * 2), 1);
+                            } else {
+                                ctx.scale(1, Math.cos(progress * Math.PI * 2));
+                            }
+                            ctx.translate(-centerX, -centerY);
+                            break;
+                    }
+                    
+                    // 绘制图片
+                    const aspectRatio = img.width / img.height;
+                    let drawWidth, drawHeight, drawX, drawY;
+                    
+                    if (aspectRatio > 1) {
+                        drawWidth = canvasSize;
+                        drawHeight = canvasSize / aspectRatio;
+                        drawX = 0;
+                        drawY = (canvasSize - drawHeight) / 2;
+                    } else {
+                        drawWidth = canvasSize * aspectRatio;
+                        drawHeight = canvasSize;
+                        drawX = (canvasSize - drawWidth) / 2;
+                        drawY = 0;
+                    }
+                    
+                    ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
+                    ctx.restore();
+                    
+                    // 获取帧数据
+                    const imageData = ctx.getImageData(0, 0, canvasSize, canvasSize);
+                    frameData.push(imageData.data.buffer);
+                    delays.push(frameDelay);
+                }
+                
+                // 创建APNG
+                try {
+                    const apngBuffer = UPNG.encode(frameData, canvasSize, canvasSize, 0, delays);
+                    const blob = new Blob([apngBuffer], { type: 'image/png' });
+                    
+                    // 创建下载链接
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `animated-${currentAnimation}.png`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    
+                    exportBtn.textContent = '📥 导出PNG';
+                    exportBtn.disabled = false;
+                } catch (error) {
+                    console.error('APNG creation error:', error);
+                    alert('PNG生成失败，请重试');
+                    exportBtn.textContent = '📥 导出PNG';
+                    exportBtn.disabled = false;
+                }
+            };
+            
+            img.src = uploadedImage;
+        }
+        
+        // 重置功能
+        resetBtn.addEventListener('click', () => {
+            uploadedImage = null;
+            fileInput.value = '';
+            previewSection.style.display = 'none';
+            animationControls.style.display = 'none';
+            exportSection.style.display = 'none';
+            
+            // 重置动画选择
+            document.querySelectorAll('.animation-option').forEach(opt => {
+                opt.classList.remove('active');
+            });
+            document.querySelector('[data-animation="fade"]').classList.add('active');
+            currentAnimation = 'fade';
+            
+            // 重置参数
+            initAnimationParams();
+        });
+        
+        // 初始化
+        initAnimationParams();
+    </script>
+</body>
+</html>
