@@ -370,7 +370,7 @@ void bubble_text_task(void *arg)
     for (int i = -6; i < 0; i++)
     {
         spi_oled_drawImage(&spi_ssd1327, 17, i, 93, 11, (const uint8_t *)text_bubble, SSD1327_GS_15);
-        spi_oled_drawText(&spi_ssd1327, 18, i, &font_10, SSD1327_GS_1, text, 91);
+        spi_oled_drawText(&spi_ssd1327, 18, i, &font_10, SSD1327_GS_1, text, 86);
         vTaskDelay(pdMS_TO_TICKS(1000 / 15));
     }
     vTaskDelete(NULL);
@@ -387,7 +387,7 @@ static void esp_now_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t 
     // Log reception
     
     ESP_ERROR_CHECK(esp_wifi_connectionless_module_set_wake_interval(0));
-    ESP_LOGI(TAG, "Received %d bytes", data_len);
+    ESP_LOGI(TAG, "Received %d bytes, RSSI: %d dBm", data_len, recv_info->rx_ctrl->rssi);
 
     if (data_len == PING_MAGIC_LEN && memcmp(data, PING_MAGIC, PING_MAGIC_LEN) == 0) // PING MSG
     {
@@ -511,7 +511,7 @@ bool init_esp_now()
         ESP_LOGE(TAG, "WiFi init failed: %s", esp_err_to_name(ret));
         return false;
     }
-
+    
     // Set WiFi mode
     ret = esp_wifi_set_mode(WIFI_MODE_STA);
     if (ret != ESP_OK)
@@ -665,7 +665,7 @@ void decode_Task(void *arg)
             is_receiving = true;
             last_recv_time = xTaskGetTickCount();
 
-            printf("Received %d bytes\n", recv_data.data_len);
+            //printf("Received %d bytes\n", recv_data.data_len);
             decode_g711(recv_data.data, recv_data.data_len, pcm_buffer, &pcm_len);
             size_t sent = xStreamBufferSend(play_stream_buf, pcm_buffer, pcm_len, 0);
         }
@@ -755,7 +755,7 @@ void detect_Task(void *arg)
 
                 if (g711_len > 0)
                 {
-                    printf("Encoded VAD cache: %zu bytes       Raw: %zu bytes\n", g711_len, res->vad_cache_size);
+                    //printf("Encoded VAD cache: %zu bytes       Raw: %zu bytes\n", g711_len, res->vad_cache_size);
                     // send_data(g711_output, g711_len);
                     send_data_esp_now(g711_output, g711_len);
                 }
@@ -933,7 +933,7 @@ void i2s_writer_task(void *arg)
             // Apply AGC to the audio buffer
             apply_agc((int16_t*)i2s_buf, received / 2, &agc_custom);
             
-            printf("Write %zu bytes to I2S (gain: %.2f)\n", received, agc_custom.current_gain);
+            //printf("Write %zu bytes to I2S (gain: %.2f)\n", received, agc_custom.current_gain);
             esp_err_t ret = esp_audio_play((const int16_t *)i2s_buf, received / 2, portMAX_DELAY);
             if (ret != ESP_OK)
             {

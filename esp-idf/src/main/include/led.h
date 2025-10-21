@@ -10,17 +10,17 @@ typedef struct
 } led_color_t;
 
 // Color definitions
-#define DARKER_TEAL_R 0
-#define DARKER_TEAL_G 30
-#define DARKER_TEAL_B 30
+#define DARKER_TEAL_R 32
+#define DARKER_TEAL_G 150
+#define DARKER_TEAL_B 32
 
-#define RECEIVING_GREEN_R 0
-#define RECEIVING_GREEN_G 255
-#define RECEIVING_GREEN_B 50
+#define RECEIVING_GREEN_R 32
+#define RECEIVING_GREEN_G 32
+#define RECEIVING_GREEN_B 255
 
-#define SPEAKING_BLUE_R 0
-#define SPEAKING_BLUE_G 150
-#define SPEAKING_BLUE_B 255
+#define SPEAKING_BLUE_R 255
+#define SPEAKING_BLUE_G 30
+#define SPEAKING_BLUE_B 0
 
 // Animation parameters
 #define TRANSITION_STEPS 10      // Steps for smooth transition
