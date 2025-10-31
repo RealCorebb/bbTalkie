@@ -111,6 +111,16 @@ typedef struct
     bool valid;
 } mac_track_entry_t;
 
+
+#define ADPCM_FRAME_SIZE 1011  // 每帧样本数
+#define ADPCM_FRAME_BYTES (ADPCM_FRAME_SIZE * sizeof(int16_t))
+
+// 编码缓冲区结构
+typedef struct {
+    int16_t buffer[ADPCM_FRAME_SIZE];
+    size_t current_samples;  // 当前缓冲区中的样本数
+} adpcm_encode_buffer_t;
+
 static mac_track_entry_t mac_track_list[MAX_MAC_TRACK];
 
 const variable_font_t font_10 = {
@@ -693,6 +703,68 @@ void decode_Task(void *arg)
     }
 }
 
+// 初始化编码缓冲区（在 detect_Task 开始时调用）
+void init_encode_buffer(adpcm_encode_buffer_t *enc_buf) {
+    enc_buf->current_samples = 0;
+}
+
+// 编码并发送数据，自动处理缓冲
+void encode_and_send(adpcm_encode_buffer_t *enc_buf, 
+                     const int16_t *pcm_data, 
+                     size_t pcm_samples,
+                     uint8_t *adpcm_output) {
+    size_t samples_processed = 0;
+    
+    while (samples_processed < pcm_samples) {
+        // 计算本次可以复制多少样本
+        size_t samples_to_copy = ADPCM_FRAME_SIZE - enc_buf->current_samples;
+        size_t samples_available = pcm_samples - samples_processed;
+        
+        if (samples_to_copy > samples_available) {
+            samples_to_copy = samples_available;
+        }
+        
+        // 复制数据到缓冲区
+        memcpy(&enc_buf->buffer[enc_buf->current_samples],
+               &pcm_data[samples_processed],
+               samples_to_copy * sizeof(int16_t));
+        
+        enc_buf->current_samples += samples_to_copy;
+        samples_processed += samples_to_copy;
+        
+        // 如果缓冲区满了，进行编码并发送
+        if (enc_buf->current_samples == ADPCM_FRAME_SIZE) {
+            size_t adpcm_len = 0;
+            encode_adpcm(enc_buf->buffer, ADPCM_FRAME_BYTES, adpcm_output, &adpcm_len);
+            
+            if (adpcm_len > 0) {
+                send_data_esp_now(adpcm_output, adpcm_len);
+            }
+            
+            // 重置缓冲区
+            enc_buf->current_samples = 0;
+        }
+    }
+}
+
+// 刷新缓冲区（在语音结束时调用）
+void flush_encode_buffer(adpcm_encode_buffer_t *enc_buf, uint8_t *adpcm_output) {
+    if (enc_buf->current_samples > 0) {
+        // 用静音填充剩余部分
+        memset(&enc_buf->buffer[enc_buf->current_samples], 0, 
+               (ADPCM_FRAME_SIZE - enc_buf->current_samples) * sizeof(int16_t));
+        
+        size_t adpcm_len = 0;
+        encode_adpcm(enc_buf->buffer, ADPCM_FRAME_BYTES, adpcm_output, &adpcm_len);
+        
+        if (adpcm_len > 0) {
+            send_data_esp_now(adpcm_output, adpcm_len);
+        }
+        
+        enc_buf->current_samples = 0;
+    }
+}
+
 void detect_Task(void *arg)
 {
     esp_afe_sr_data_t *afe_data = arg;
@@ -704,14 +776,18 @@ void detect_Task(void *arg)
     int mu_chunksize = multinet->get_samp_chunksize(model_data);
     printf("mu chunksize:%d, afe chunksize:%d\n", mu_chunksize, afe_chunksize);
     assert(mu_chunksize == afe_chunksize);
-    int16_t *buff = malloc(afe_chunksize * sizeof(int16_t));
     multinet->print_active_speech_commands(model_data);
     printf("------------detect start------------\n");
-    assert(buff);
     printf("------------vad start------------\n");
 
     uint8_t *adpcm_output = malloc(ENCODED_BUF_SIZE);
+    
+    // 初始化编码缓冲区
+    adpcm_encode_buffer_t encode_buffer;
+    init_encode_buffer(&encode_buffer);
+    
     esp_mn_state_t mn_state = ESP_MN_STATE_DETECTING;
+    
     while (1)
     {
         afe_fetch_result_t *res = afe_handle->fetch(afe_data);
@@ -721,14 +797,10 @@ void detect_Task(void *arg)
             break;
         }
 
-        // printf("vad state: %s\n",res->vad_state == VAD_SILENCE ? "noise" : "speech");
-
         // save speech data
         if (res->vad_state != VAD_SILENCE && !is_receiving && !isMicOff)
         {
             is_speaking = true;
-            // Define a buffer for adpcm output
-            size_t adpcm_len = 0;
 
             if (adpcm_output == NULL)
             {
@@ -736,19 +808,14 @@ void detect_Task(void *arg)
                 return;
             }
 
+            // 处理 VAD cache
             if (res->vad_cache_size > 0)
             {
-                // Make sure we have enough data for at least one frame
-                encode_adpcm(res->vad_cache, res->vad_cache_size, adpcm_output, &adpcm_len);
-
-                if (adpcm_len > 0)
-                {
-                    //printf("Encoded VAD cache: %zu bytes       Raw: %zu bytes\n", adpcm_len, res->vad_cache_size);
-                    // send_data(adpcm_output, adpcm_len);
-                    send_data_esp_now(adpcm_output, adpcm_len);
-                }
-                size_t num_chunks = res->vad_cache_size / (mu_chunksize * sizeof(int16_t));
-                // printf("vad_cache_size: %zu , mu_chunksize: %d, num_chunks: %zu\n", res->vad_cache_size, mu_chunksize, num_chunks);
+                size_t cache_samples = res->vad_cache_size / sizeof(int16_t);
+                encode_and_send(&encode_buffer, res->vad_cache, cache_samples, adpcm_output);
+                
+                // MultiNet 检测
+                size_t num_chunks = cache_samples / mu_chunksize;
                 for (size_t i = 0; i < num_chunks; i++)
                 {
                     int16_t *chunk = res->vad_cache + (i * mu_chunksize);
@@ -756,20 +823,14 @@ void detect_Task(void *arg)
                 }
             }
 
+            // 处理语音数据
             if (res->vad_state == VAD_SPEECH)
             {
-                // printf("vad_data_size: %zu\n", res->data_size);
-                //   Make sure we have enough data for at least one frame
-                adpcm_len = 0; // Reset for new encoding
-                encode_adpcm(res->data, res->data_size, adpcm_output, &adpcm_len);
-
-                if (adpcm_len > 0)
-                {
-                    // printf("Encoded speech data: %zu bytes      Raw: %zu bytes\n", adpcm_len, res->data_size);
-                    send_data_esp_now(adpcm_output, adpcm_len);
-                }
+                size_t data_samples = res->data_size / sizeof(int16_t);
+                encode_and_send(&encode_buffer, res->data, data_samples, adpcm_output);
                 mn_state = multinet->detect(model_data, res->data);
             }
+            
             // MultiNet words detect
             if (mn_state == ESP_MN_STATE_DETECTING)
             {
@@ -782,7 +843,8 @@ void detect_Task(void *arg)
                 for (int i = 0; i < mn_result->num; i++)
                 {
                     printf("TOP %d, command_id: %d, phrase_id: %d, string:%s prob: %f\n",
-                           i + 1, mn_result->command_id[i], mn_result->phrase_id[i], mn_result->string, mn_result->prob[i]);
+                           i + 1, mn_result->command_id[i], mn_result->phrase_id[i], 
+                           mn_result->string, mn_result->prob[i]);
                 }
                 printf("Playing animation for command_id: %d\n", mn_result->command_id[0]);
                 if (anim_currentCommand != NULL)
@@ -820,17 +882,19 @@ void detect_Task(void *arg)
         else
         {
             if (is_speaking == true)
-            { // Call once per speaking
+            { 
+                // 刷新缓冲区中剩余的数据
+                flush_encode_buffer(&encode_buffer, adpcm_output);
                 printf("clean\n");
                 multinet->clean(model_data);
             }
             is_speaking = false;
         }
     }
-    if (buff)
+    
+    if (adpcm_output)
     {
-        free(buff);
-        buff = NULL;
+        free(adpcm_output);
     }
     vTaskDelete(NULL);
 }
