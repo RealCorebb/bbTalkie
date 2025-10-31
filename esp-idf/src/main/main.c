@@ -28,8 +28,8 @@
 #include "esp_audio_enc_default.h"
 #include "esp_audio_dec_default.h"
 #include "esp_audio_dec.h"
-#include "esp_g711_enc.h"
-#include "esp_g711_dec.h"
+#include "esp_adpcm_enc.h"
+#include "esp_adpcm_dec.h"
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -587,143 +587,71 @@ void feed_Task(void *arg)
     vTaskDelete(NULL);
 }
 
-
-
-// 添加降采样函数 (16kHz -> 8kHz)
-void downsample_16k_to_8k(const int16_t *input, int16_t *output, size_t input_samples) {
-    // 简单的2:1降采样,每2个样本取1个
-    for (size_t i = 0; i < input_samples / 2; i++) {
-        output[i] = input[i * 2];
-    }
-}
-
-// 添加升采样函数 (8kHz -> 16kHz)
-void upsample_8k_to_16k(const int16_t *input, int16_t *output, size_t input_samples) {
-    // 简单的线性插值升采样
-    for (size_t i = 0; i < input_samples; i++) {
-        output[i * 2] = input[i];
-        // 线性插值
-        if (i < input_samples - 1) {
-            output[i * 2 + 1] = (input[i] + input[i + 1]) / 2;
-        } else {
-            output[i * 2 + 1] = input[i];
-        }
-    }
-}
-
-// 更新G.711编码函数,使用8kHz
-void encode_g711_8k(const int16_t *pcm_data_16k, size_t pcm_len_samples_16k, 
-                    uint8_t *g711_output, size_t *g711_len)
+void encode_adpcm(const int16_t *pcm_data, size_t pcm_len_bytes, uint8_t *adpcm_output, size_t *adpcm_len)
 {
-    // 计算8kHz样本数量
-    size_t pcm_len_samples_8k = pcm_len_samples_16k / 2;
-    
-    // 分配8kHz缓冲区
-    int16_t *pcm_data_8k = malloc(pcm_len_samples_8k * sizeof(int16_t));
-    if (pcm_data_8k == NULL) {
-        printf("Failed to allocate downsample buffer\n");
-        *g711_len = 0;
-        return;
-    }
-    
-    // 降采样 16kHz -> 8kHz
-    downsample_16k_to_8k(pcm_data_16k, pcm_data_8k, pcm_len_samples_16k);
-    
-    // Register g711 encoder
+    // Register adpcm encoder
     esp_audio_enc_register_default();
-    
-    // Config for 8kHz
-    esp_g711_enc_config_t g711_cfg = {
-        .sample_rate = 8000,  // 改为8kHz
+    // Config
+    esp_adpcm_enc_config_t adpcm_cfg = {
+        .sample_rate = SAMPLE_RATE,
         .bits_per_sample = BIT_DEPTH,
-        .channel = 1,
-        .frame_duration = 32
-    };
+        .channel = 1};
 
     esp_audio_enc_config_t enc_cfg = {
-        .type = ESP_AUDIO_TYPE_G711A,
-        .cfg = &g711_cfg,
-        .cfg_sz = sizeof(g711_cfg)
-    };
+        .type = ESP_AUDIO_TYPE_ADPCM,
+        .cfg = &adpcm_cfg,
+        .cfg_sz = sizeof(adpcm_cfg)};
 
     esp_audio_enc_handle_t encoder;
     esp_audio_enc_open(&enc_cfg, &encoder);
 
-    // 使用8kHz数据编码
+    // Prepare I/O frames with aligned length
     esp_audio_enc_in_frame_t in_frame = {
-        .buffer = (uint8_t *)pcm_data_8k,
-        .len = pcm_len_samples_8k * sizeof(int16_t)
-    };
+        .buffer = (uint8_t *)pcm_data,
+        .len = pcm_len_bytes};
 
     esp_audio_enc_out_frame_t out_frame = {
-        .buffer = g711_output,
-        .len = pcm_len_samples_8k  // 8kHz G.711输出大小
-    };
+        .buffer = adpcm_output,
+        .len = pcm_len_bytes / 4};
 
     // Encode
     esp_audio_enc_process(encoder, &in_frame, &out_frame);
-    *g711_len = out_frame.encoded_bytes;
-    
-    esp_audio_enc_close(encoder);
-    free(pcm_data_8k);
+    *adpcm_len = out_frame.encoded_bytes;
 }
-// 更新G.711解码函数,输出16kHz
-void decode_g711_to_16k(const uint8_t *g711_data, size_t g711_len, 
-                        uint8_t *pcm_output_16k, size_t *pcm_len_16k)
+
+void decode_adpcm(const uint8_t *adpcm_data, size_t adpcm_len, uint8_t *pcm_output, size_t *pcm_len)
 {
-    // Register g711 decoder
+    // Register adpcm decoder
     esp_audio_dec_register_default();
-    
-    // Config for 8kHz
-    esp_g711_dec_cfg_t g711_cfg = {
-        .channel = 1
-    };
+    // Config
+    esp_adpcm_dec_cfg_t adpcm_cfg = {
+        .channel = 1};
 
     esp_audio_dec_cfg_t dec_cfg = {
-        .type = ESP_AUDIO_TYPE_G711A,
-        .cfg = &g711_cfg,
-        .cfg_sz = sizeof(g711_cfg)
-    };
+        .type = ESP_AUDIO_TYPE_ADPCM,
+        .cfg = &adpcm_cfg,
+        .cfg_sz = sizeof(adpcm_cfg)};
 
     esp_audio_dec_handle_t decoder;
     esp_audio_dec_open(&dec_cfg, &decoder);
 
-    // 分配8kHz解码缓冲区
-    size_t pcm_len_8k_samples = g711_len;  // G.711 A-law: 1 byte = 1 sample
-    int16_t *pcm_data_8k = malloc(pcm_len_8k_samples * sizeof(int16_t));
-    if (pcm_data_8k == NULL) {
-        printf("Failed to allocate decode buffer\n");
-        *pcm_len_16k = 0;
-        esp_audio_dec_close(decoder);
-        return;
-    }
-
-    // 解码到8kHz
+    // Prepare I/O frames with aligned length
     esp_audio_dec_in_raw_t raw = {
-        .buffer = g711_data,
-        .len = g711_len
-    };
+        .buffer = adpcm_data,
+        .len = adpcm_len};
 
     esp_audio_dec_out_frame_t out_frame = {
-        .buffer = (uint8_t *)pcm_data_8k,
-        .len = pcm_len_8k_samples * sizeof(int16_t)
-    };
+        .buffer = (uint8_t *)pcm_output,
+        .len = adpcm_len * 4}; // Assuming 16-bit PCM
 
     // Decode
     esp_audio_dec_process(decoder, &raw, &out_frame);
-    
-    // 升采样 8kHz -> 16kHz
-    upsample_8k_to_16k(pcm_data_8k, (int16_t *)pcm_output_16k, 
-                       out_frame.len / sizeof(int16_t));
-    *pcm_len_16k = out_frame.len * 2;  // 16kHz数据是8kHz的2倍
-    
-    esp_audio_dec_close(decoder);
-    free(pcm_data_8k);
+    *pcm_len = out_frame.len;
 }
 
 void decode_Task(void *arg)
 {
-    uint8_t *pcm_buffer = malloc(ENCODED_BUF_SIZE * 2);  // 需要更大的缓冲区(16kHz)
+    uint8_t *pcm_buffer = malloc(ENCODED_BUF_SIZE);
     size_t pcm_len = 0;
 
     TickType_t last_recv_time = xTaskGetTickCount();
@@ -736,8 +664,8 @@ void decode_Task(void *arg)
             is_receiving = true;
             last_recv_time = xTaskGetTickCount();
 
-            // 使用新的解码函数,输出16kHz
-            decode_g711_to_16k(recv_data.data, recv_data.data_len, pcm_buffer, &pcm_len);
+            //printf("Received %d bytes\n", recv_data.data_len);
+            decode_adpcm(recv_data.data, recv_data.data_len, pcm_buffer, &pcm_len);
             size_t sent = xStreamBufferSend(play_stream_buf, pcm_buffer, pcm_len, 0);
         }
         else if (xTaskGetTickCount() - last_recv_time > pdMS_TO_TICKS(128))
@@ -747,8 +675,8 @@ void decode_Task(void *arg)
             ESP_ERROR_CHECK(esp_now_set_wake_window(25));
             ESP_ERROR_CHECK(esp_wifi_connectionless_module_set_wake_interval(100));
 
-            const int silence_samples = 512;
-            int16_t *silence_buffer = calloc(silence_samples * 2, sizeof(int16_t));
+            const int silence_samples = 512;                                        // Adjust this number as needed
+            int16_t *silence_buffer = calloc(silence_samples * 2, sizeof(int16_t)); // Already all zeros
 
             if (silence_buffer != NULL)
             {
@@ -762,17 +690,6 @@ void decode_Task(void *arg)
         }
 
         vTaskDelay(pdMS_TO_TICKS(16));
-    }
-}
-
-void ping_task(void *arg)
-{
-    send_data_esp_now((const uint8_t *)PING_MAGIC, PING_MAGIC_LEN);
-    // ping every 10 seconds
-    while (1)
-    {
-        vTaskDelay(pdMS_TO_TICKS(10000)); // 10 seconds
-        send_data_esp_now((const uint8_t *)PING_MAGIC, PING_MAGIC_LEN);
     }
 }
 
@@ -793,9 +710,8 @@ void detect_Task(void *arg)
     assert(buff);
     printf("------------vad start------------\n");
 
-    uint8_t *g711_output = malloc(ENCODED_BUF_SIZE);
+    uint8_t *adpcm_output = malloc(ENCODED_BUF_SIZE);
     esp_mn_state_t mn_state = ESP_MN_STATE_DETECTING;
-    
     while (1)
     {
         afe_fetch_result_t *res = afe_handle->fetch(afe_data);
@@ -805,31 +721,34 @@ void detect_Task(void *arg)
             break;
         }
 
+        // printf("vad state: %s\n",res->vad_state == VAD_SILENCE ? "noise" : "speech");
+
         // save speech data
         if (res->vad_state != VAD_SILENCE && !is_receiving && !isMicOff)
         {
             is_speaking = true;
-            size_t g711_len = 0;
+            // Define a buffer for adpcm output
+            size_t adpcm_len = 0;
 
-            if (g711_output == NULL)
+            if (adpcm_output == NULL)
             {
-                printf("Failed to allocate g711 buffer\n");
+                printf("Failed to allocate adpcm buffer\n");
                 return;
             }
 
             if (res->vad_cache_size > 0)
             {
-                // 使用新的编码函数 (16kHz -> 8kHz -> G.711)
-                encode_g711_8k(res->vad_cache, 
-                              res->vad_cache_size / sizeof(int16_t), 
-                              g711_output, &g711_len);
+                // Make sure we have enough data for at least one frame
+                encode_adpcm(res->vad_cache, res->vad_cache_size, adpcm_output, &adpcm_len);
 
-                if (g711_len > 0)
+                if (adpcm_len > 0)
                 {
-                    send_data_esp_now(g711_output, g711_len);
+                    //printf("Encoded VAD cache: %zu bytes       Raw: %zu bytes\n", adpcm_len, res->vad_cache_size);
+                    // send_data(adpcm_output, adpcm_len);
+                    send_data_esp_now(adpcm_output, adpcm_len);
                 }
-                
                 size_t num_chunks = res->vad_cache_size / (mu_chunksize * sizeof(int16_t));
+                // printf("vad_cache_size: %zu , mu_chunksize: %d, num_chunks: %zu\n", res->vad_cache_size, mu_chunksize, num_chunks);
                 for (size_t i = 0; i < num_chunks; i++)
                 {
                     int16_t *chunk = res->vad_cache + (i * mu_chunksize);
@@ -839,19 +758,18 @@ void detect_Task(void *arg)
 
             if (res->vad_state == VAD_SPEECH)
             {
-                g711_len = 0;
-                // 使用新的编码函数 (16kHz -> 8kHz -> G.711)
-                encode_g711_8k(res->data, 
-                              res->data_size / sizeof(int16_t), 
-                              g711_output, &g711_len);
+                // printf("vad_data_size: %zu\n", res->data_size);
+                //   Make sure we have enough data for at least one frame
+                adpcm_len = 0; // Reset for new encoding
+                encode_adpcm(res->data, res->data_size, adpcm_output, &adpcm_len);
 
-                if (g711_len > 0)
+                if (adpcm_len > 0)
                 {
-                    send_data_esp_now(g711_output, g711_len);
+                    // printf("Encoded speech data: %zu bytes      Raw: %zu bytes\n", adpcm_len, res->data_size);
+                    send_data_esp_now(adpcm_output, adpcm_len);
                 }
                 mn_state = multinet->detect(model_data, res->data);
             }
-            
             // MultiNet words detect
             if (mn_state == ESP_MN_STATE_DETECTING)
             {
@@ -864,8 +782,7 @@ void detect_Task(void *arg)
                 for (int i = 0; i < mn_result->num; i++)
                 {
                     printf("TOP %d, command_id: %d, phrase_id: %d, string:%s prob: %f\n",
-                           i + 1, mn_result->command_id[i], mn_result->phrase_id[i], 
-                           mn_result->string, mn_result->prob[i]);
+                           i + 1, mn_result->command_id[i], mn_result->phrase_id[i], mn_result->string, mn_result->prob[i]);
                 }
                 printf("Playing animation for command_id: %d\n", mn_result->command_id[0]);
                 if (anim_currentCommand != NULL)
@@ -876,8 +793,7 @@ void detect_Task(void *arg)
 
                 // Send CMD via ESP-NOW
                 char cmd_buffer[32];
-                int cmd_len = snprintf(cmd_buffer, sizeof(cmd_buffer), 
-                                      "CMD:%d", mn_result->command_id[0]);
+                int cmd_len = snprintf(cmd_buffer, sizeof(cmd_buffer), "CMD:%d", mn_result->command_id[0]);
                 if (cmd_len > 0 && cmd_len < sizeof(cmd_buffer))
                 {
                     send_data_esp_now((const uint8_t *)cmd_buffer, cmd_len);
@@ -888,13 +804,11 @@ void detect_Task(void *arg)
             {
                 esp_mn_results_t *mn_result = multinet->get_results(model_data);
                 printf("timeout, string:%s\n", mn_result->string);
-                xTaskCreate(bubble_text_task, "bubbleText", 4096, 
-                           mn_result->string, 5, NULL);
+                xTaskCreate(bubble_text_task, "bubbleText", 4096, mn_result->string, 5, NULL);
 
                 // Send MSG via ESP-NOW
                 char msg_buffer[ESP_NOW_MAX_DATA_LEN_V2];
-                int msg_len = snprintf(msg_buffer, sizeof(msg_buffer), 
-                                      "MSG:%s", mn_result->string);
+                int msg_len = snprintf(msg_buffer, sizeof(msg_buffer), "MSG:%s", mn_result->string);
                 if (msg_len > 0 && msg_len < sizeof(msg_buffer))
                 {
                     send_data_esp_now((const uint8_t *)msg_buffer, msg_len);
@@ -906,7 +820,7 @@ void detect_Task(void *arg)
         else
         {
             if (is_speaking == true)
-            {
+            { // Call once per speaking
                 printf("clean\n");
                 multinet->clean(model_data);
             }
@@ -919,6 +833,17 @@ void detect_Task(void *arg)
         buff = NULL;
     }
     vTaskDelete(NULL);
+}
+
+void ping_task(void *arg)
+{
+    send_data_esp_now((const uint8_t *)PING_MAGIC, PING_MAGIC_LEN);
+    // ping every 10 seconds
+    while (1)
+    {
+        vTaskDelay(pdMS_TO_TICKS(10000)); // 10 seconds
+        send_data_esp_now((const uint8_t *)PING_MAGIC, PING_MAGIC_LEN);
+    }
 }
 
 void byebye_anim(void *pvParameters)
