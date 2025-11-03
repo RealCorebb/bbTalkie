@@ -112,7 +112,7 @@ typedef struct
 } mac_track_entry_t;
 
 
-#define ADPCM_FRAME_SIZE 1011  // 每帧样本数
+#define ADPCM_FRAME_SIZE 505  // 每帧样本数
 #define ADPCM_FRAME_BYTES (ADPCM_FRAME_SIZE * sizeof(int16_t))
 
 // 编码缓冲区结构
@@ -120,6 +120,8 @@ typedef struct {
     int16_t buffer[ADPCM_FRAME_SIZE];
     size_t current_samples;  // 当前缓冲区中的样本数
 } adpcm_encode_buffer_t;
+
+adpcm_encode_buffer_t encode_buffer;
 
 static mac_track_entry_t mac_track_list[MAX_MAC_TRACK];
 
@@ -622,7 +624,7 @@ void encode_adpcm(const int16_t *pcm_data, size_t pcm_len_bytes, uint8_t *adpcm_
 
     esp_audio_enc_out_frame_t out_frame = {
         .buffer = adpcm_output,
-        .len = pcm_len_bytes / 4};
+        .len = (pcm_len_bytes / 4) + 7};
 
     // Encode
     esp_audio_enc_process(encoder, &in_frame, &out_frame);
@@ -635,6 +637,8 @@ void decode_adpcm(const uint8_t *adpcm_data, size_t adpcm_len, uint8_t *pcm_outp
     esp_audio_dec_register_default();
     // Config
     esp_adpcm_dec_cfg_t adpcm_cfg = {
+        .sample_rate = SAMPLE_RATE,
+        .bits_per_sample = BIT_DEPTH / 4,
         .channel = 1};
 
     esp_audio_dec_cfg_t dec_cfg = {
@@ -656,7 +660,7 @@ void decode_adpcm(const uint8_t *adpcm_data, size_t adpcm_len, uint8_t *pcm_outp
 
     // Decode
     esp_audio_dec_process(decoder, &raw, &out_frame);
-    *pcm_len = out_frame.len;
+    *pcm_len = ADPCM_FRAME_SIZE * 2;//out_frame.len;
 }
 
 void decode_Task(void *arg)
@@ -783,11 +787,11 @@ void detect_Task(void *arg)
     uint8_t *adpcm_output = malloc(ENCODED_BUF_SIZE);
     
     // 初始化编码缓冲区
-    adpcm_encode_buffer_t encode_buffer;
+    printf("detect_Task init_encode_buffer\n");
     init_encode_buffer(&encode_buffer);
     
     esp_mn_state_t mn_state = ESP_MN_STATE_DETECTING;
-    
+    printf("detect_Task enter loop\n");
     while (1)
     {
         afe_fetch_result_t *res = afe_handle->fetch(afe_data);
