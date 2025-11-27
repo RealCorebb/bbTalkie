@@ -439,8 +439,8 @@ static void esp_now_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t 
     {
         if (data_len >= 5)
         {
-            // Extract the command parameter after "CMD:"
-            char cmd_param[32]; // Adjust size as needed
+            // Extract command parameter
+            char cmd_param[32];
             int param_len = data_len - 4;
             if (param_len >= sizeof(cmd_param))
             {
@@ -449,17 +449,47 @@ static void esp_now_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t 
             memcpy(cmd_param, data + 4, param_len);
             cmd_param[param_len] = '\0';
 
-            // Convert to integer and handle animation
+            // Convert to integer
             int cmd_value = atoi(cmd_param);
             ESP_LOGI(TAG, "Processed CMD: %d", cmd_value);
 
-            // Handle animation for received command
-            printf("Playing animation for received command_id: %d\n", cmd_value);
-            if (anim_currentCommand != NULL)
-                anim_currentCommand->is_playing = false;
-            anim_currentCommand = get_animation_by_key(cmd_value);
-            lastState = -1;
-            is_command = true;
+            // Get command entry
+            animation_map_entry_t *cmd_entry = get_command_entry_by_key(cmd_value);
+            
+            if (cmd_entry != NULL)
+            {
+                // Handle animation if present
+                if (cmd_entry->animation != NULL && 
+                    (cmd_entry->cmd_type == CMD_TYPE_ANIMATION))
+                {
+                    printf("Playing animation for command_id: %d\n", cmd_value);
+                    if (anim_currentCommand != NULL)
+                        anim_currentCommand->is_playing = false;
+                    
+                    anim_currentCommand = cmd_entry->animation;
+                    lastState = -1;
+                    is_command = true;
+                }
+
+                // Handle BLE transmission if configured
+                if (cmd_entry->cmd_type == CMD_TYPE_BLE_SEND)
+                {
+                    if (cmd_entry->ble_data != NULL && cmd_entry->ble_data_len > 0)
+                    {
+                        printf("Sending BLE data for command_id: %d\n", cmd_value);
+                        esp_err_t ret = ble_send_data(cmd_entry->ble_data, 
+                                                       cmd_entry->ble_data_len);
+                        
+                        if (ret != ESP_OK) {
+                            ESP_LOGW(TAG, "Failed to send BLE data for cmd: %d", cmd_value);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                ESP_LOGW(TAG, "Unknown command: %d", cmd_value);
+            }
         }
     }
     // MSG: prefix handling
@@ -1598,6 +1628,15 @@ static void button_double_click_cb(void *arg, void *usr_data)
     draw_status();
 }
 
+static void button_multiple_click_cb(void *arg, void *usr_data)
+{
+    printf("Multiple click\n");
+    // Initialize BLE client
+    ble_client_init();
+    // Connect to BLE device
+    ble_connect_to_device();
+}
+
 static esp_err_t init_button(void)
 {
     // Clean up any existing button first
@@ -1625,22 +1664,21 @@ static esp_err_t init_button(void)
     ret = iot_button_register_cb(btn, BUTTON_LONG_PRESS_START, NULL, button_long_press_cb, NULL);
     if (ret != ESP_OK) {
         printf("Failed to register long press callback\n");
-        cleanup_button();
-        return ret;
     }
     
     ret = iot_button_register_cb(btn, BUTTON_SINGLE_CLICK, NULL, button_single_click_cb, NULL);
     if (ret != ESP_OK) {
         printf("Failed to register single click callback\n");
-        cleanup_button();
-        return ret;
     }
     
     ret = iot_button_register_cb(btn, BUTTON_DOUBLE_CLICK, NULL, button_double_click_cb, NULL);
     if (ret != ESP_OK) {
         printf("Failed to register double click callback\n");
-        cleanup_button();
-        return ret;
+    }
+
+    ret = iot_button_register_cb(btn, BUTTON_MULTIPLE_CLICK, NULL, button_multiple_click_cb, NULL);
+    if (ret != ESP_OK) {
+        printf("Failed to register double click callback\n");
     }
 
     button_initialized = true;
