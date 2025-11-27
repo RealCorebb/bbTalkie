@@ -880,13 +880,39 @@ void detect_Task(void *arg)
                            i + 1, mn_result->command_id[i], mn_result->phrase_id[i], 
                            mn_result->string, mn_result->prob[i]);
                 }
-                printf("Playing animation for command_id: %d\n", mn_result->command_id[0]);
-                if (anim_currentCommand != NULL)
-                    anim_currentCommand->is_playing = false;
-                anim_currentCommand = get_animation_by_key(mn_result->command_id[0]);
-                lastState = -1;
-                is_command = true;
+                // Get command entry
+                animation_map_entry_t *cmd_entry = get_command_entry_by_key(mn_result->command_id[0]);
+                
+                if (cmd_entry != NULL)
+                {
+                    // Handle animation if present
+                    if (cmd_entry->animation != NULL && 
+                        (cmd_entry->cmd_type == CMD_TYPE_ANIMATION))
+                    {
+                        printf("Playing animation for command_id: %d\n", mn_result->command_id[0]);
+                        if (anim_currentCommand != NULL)
+                            anim_currentCommand->is_playing = false;
+                        
+                        anim_currentCommand = cmd_entry->animation;
+                        lastState = -1;
+                        is_command = true;
+                    }
 
+                    // Handle BLE transmission if configured
+                    if (cmd_entry->cmd_type == CMD_TYPE_BLE_SEND)
+                    {
+                        if (cmd_entry->ble_data != NULL && cmd_entry->ble_data_len > 0)
+                        {
+                            printf("Sending BLE data for command_id: %d\n", mn_result->command_id[0]);
+                            esp_err_t ret = ble_send_data(cmd_entry->ble_data, 
+                                                        cmd_entry->ble_data_len);
+                            
+                            if (ret != ESP_OK) {
+                                ESP_LOGW(TAG, "Failed to send BLE data for cmd: %d", mn_result->command_id[0]);
+                            }
+                        }
+                    }
+                }
                 // Send CMD via ESP-NOW
                 char cmd_buffer[32];
                 int cmd_len = snprintf(cmd_buffer, sizeof(cmd_buffer), "CMD:%d", mn_result->command_id[0]);
@@ -1680,7 +1706,11 @@ static esp_err_t init_button(void)
         printf("Failed to register double click callback\n");
     }
 
-    ret = iot_button_register_cb(btn, BUTTON_MULTIPLE_CLICK, NULL, button_multiple_click_cb, NULL);
+    button_event_args_t args = {
+        .multiple_clicks.clicks = 3,
+    };
+
+    ret = iot_button_register_cb(btn, BUTTON_MULTIPLE_CLICK, &args, button_multiple_click_cb, NULL);
     if (ret != ESP_OK) {
         printf("Failed to register double click callback\n");
     }
