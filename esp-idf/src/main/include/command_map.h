@@ -1,43 +1,43 @@
-#include <stdio.h>
-#include <string.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/event_groups.h"
-#include "esp_log.h"
-#include "esp_err.h"
-#include "nvs_flash.h"
+#include "nimble/nimble_port.h"
+#include "nimble/nimble_port_freertos.h"
+#include "host/ble_hs.h"
+#include "host/util/util.h"
+#include "services/gap/ble_svc_gap.h"
+#include "services/gatt/ble_svc_gatt.h"
 
-// Bluedroid/GATTC Includes
-#include "esp_bt.h"
-#include "esp_gap_ble_api.h"
-#include "esp_gattc_api.h"
-#include "esp_gatt_defs.h"
-#include "esp_bt_main.h"
-#include "esp_bt_defs.h"
+static const char *TAG_BLE = "BLE_CAMERA";
 
-
-static const char *TAG_BLE = "BLE_CLIENT_NIMBLE";
-
-// ===== Configuration Defines =====
 #define BLE_DEVICE_NAME "ZV-E1"
 
-// Service UUID: 8000-ff00-ff00-ffff-ffffffffffff (128-bit)
-// Note: NimBLE expects UUIDs to be constructed carefully. 
-// We will construct this into a ble_uuid128_t later.
+// Service UUID: 8000-ff00-ff00-ffff-ffffffffffff
 static const uint8_t target_service_uuid_bytes[16] = {
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
     0xff, 0xff, 0x00, 0xff, 0x00, 0xff, 0x00, 0x80
 };
 
-// Characteristic UUID: 0xff01 (16-bit)
-#define BLE_CHAR_UUID_16BIT 0xff01
+// Characteristic UUIDs
+#define BLE_CHAR_COMMAND_UUID 0xff01
+#define BLE_CHAR_NOTIFY_UUID  0xff02
+
+// ===== BLE Commands =====
+static uint8_t cmd_focus_down[] = {0x01, 0x07};
+static uint8_t TAKE_PICTURE[] = {0x01, 0x09};
+static uint8_t SHUTTER_RELEASED[] = {0x01, 0x06};
+static uint8_t HOLD_FOCUS[] = {0x01, 0x08};
+
+// ===== State Variables =====
+static bool ble_connected = false;
+static uint16_t ble_conn_handle = 0;
+static uint16_t ble_char_command_handle = 0;
+static uint16_t ble_char_notify_handle = 0;
+static bool camera_ready_to_pair = false;
+static bool should_pair = false;
 
 // ===== Command Type Enum & Structs (Unchanged) =====
 typedef enum {
     CMD_TYPE_ANIMATION,
     CMD_TYPE_BLE_SEND
 } command_type_t;
-
 
 typedef struct {
     int key;
@@ -240,9 +240,6 @@ spi_oled_animation_t anim_drink = {
     .reverse = false,
     .task_handle = NULL};
 
-// ===== BLE Data Buffers =====
-static uint8_t cmd_focus_down[] = {0x01, 0x07};
-
 static animation_map_entry_t animation_map[] = {
     {1, &anim_turn_left, CMD_TYPE_ANIMATION, NULL, 0},
     {2, &anim_turn_right, CMD_TYPE_ANIMATION, NULL, 0},
@@ -263,62 +260,88 @@ static animation_map_entry_t animation_map[] = {
     {50, NULL, CMD_TYPE_BLE_SEND, cmd_focus_down, sizeof(cmd_focus_down)},
 };
 
-// ===== BLE State Variables =====
-static bool ble_connected = false;
-static uint16_t ble_conn_handle = 0; // NimBLE uses handles, not IDs
-static uint16_t ble_char_val_handle = 0; // Handle to write to
-static bool target_device_found = false;
-
-// (Keeping your animation structs placeholders for brevity/compilation)
-spi_oled_animation_t anim_placeholder = {0}; 
-
 // Forward declarations
 static void ble_scan_start(void);
-static int ble_gap_event(struct ble_gap_event *event, void *arg);
 
-
-// Callback when a Characteristic is discovered
-static int ble_on_disc_chr(uint16_t conn_handle, const struct ble_gatt_error *error,
-                           const struct ble_gatt_chr *chr, void *arg)
+// ===== Notification Callbacks =====
+static int ble_on_notify(uint16_t conn_handle, const struct ble_gatt_error *error,
+                         struct ble_gatt_attr *attr, void *arg)
 {
     if (error->status == 0) {
-        // Found a characteristic
-        if (ble_uuid_u16(&chr->uuid.u) == BLE_CHAR_UUID_16BIT) {
-            ESP_LOGI(TAG_BLE, "Target characteristic found! Handle: %d", chr->val_handle);
-            ble_char_val_handle = chr->val_handle;
-            // Setup complete
-            ESP_LOGI(TAG_BLE, "BLE setup complete - ready to send commands!");
-        }
-    } else if (error->status == BLE_HS_EDONE) {
-        // Discovery complete
-        ESP_LOGD(TAG_BLE, "Characteristic discovery complete");
+        ESP_LOGI(TAG_BLE, "Notification received, handle=%d, len=%d", 
+                 attr->handle, OS_MBUF_PKTLEN(attr->om));
+        
+        // Print hex data
+        uint8_t data[256];
+        uint16_t len = OS_MBUF_PKTLEN(attr->om);
+        if (len > sizeof(data)) len = sizeof(data);
+        
+        os_mbuf_copydata(attr->om, 0, len, data);
+        
+        ESP_LOG_BUFFER_HEX(TAG_BLE, data, len);
     }
     return 0;
 }
 
-// Callback when a Service is discovered
+// ===== Subscribe to Notifications =====
+static void subscribe_to_notifications(void)
+{
+    if (ble_char_command_handle != 0) {
+        ESP_LOGI(TAG_BLE, "Subscribing to command notifications...");
+        ble_gattc_indicate(ble_conn_handle, ble_char_command_handle);
+        
+        // Register for notifications
+        ble_gattc_notify(ble_conn_handle, ble_char_command_handle);
+    }
+    
+    if (ble_char_notify_handle != 0) {
+        ESP_LOGI(TAG_BLE, "Subscribing to notify characteristic...");
+        ble_gattc_notify(ble_conn_handle, ble_char_notify_handle);
+    }
+}
+
+// ===== Characteristic Discovery Callback =====
+static int ble_on_disc_chr(uint16_t conn_handle, const struct ble_gatt_error *error,
+                           const struct ble_gatt_chr *chr, void *arg)
+{
+    if (error->status == 0) {
+        uint16_t uuid16 = ble_uuid_u16(&chr->uuid.u);
+        
+        if (uuid16 == BLE_CHAR_COMMAND_UUID) {
+            ESP_LOGI(TAG_BLE, "Command characteristic found! Handle: %d", chr->val_handle);
+            ble_char_command_handle = chr->val_handle;
+        } else if (uuid16 == BLE_CHAR_NOTIFY_UUID) {
+            ESP_LOGI(TAG_BLE, "Notify characteristic found! Handle: %d", chr->val_handle);
+            ble_char_notify_handle = chr->val_handle;
+        }
+    } else if (error->status == BLE_HS_EDONE) {
+        ESP_LOGI(TAG_BLE, "Characteristic discovery complete");
+        
+        // Subscribe to notifications after discovery
+        subscribe_to_notifications();
+        
+        ESP_LOGI(TAG_BLE, "BLE setup complete - ready to send commands!");
+    }
+    return 0;
+}
+
+// ===== Service Discovery Callback =====
 static int ble_on_disc_svc(uint16_t conn_handle, const struct ble_gatt_error *error,
                            const struct ble_gatt_svc *service, void *arg)
 {
     if (error->status == 0) {
-        // Service found, now verify UUID match
         ble_uuid128_t target_uuid;
         ble_uuid_init_from_buf((ble_uuid_any_t *)&target_uuid, target_service_uuid_bytes, 16);
 
         if (ble_uuid_cmp(&service->uuid.u, &target_uuid.u) == 0) {
             ESP_LOGI(TAG_BLE, "Target Service Found! Discovering characteristics...");
             
-            // Search for the specific 16-bit characteristic inside this service
-            ble_uuid16_t target_chr_uuid;
-            ble_uuid_init_from_buf((ble_uuid_any_t *)&target_chr_uuid, 
-                                  (const uint8_t[]){(BLE_CHAR_UUID_16BIT) & 0xFF, (BLE_CHAR_UUID_16BIT >> 8) & 0xFF}, 2);
-
-            ble_gattc_disc_chrs_by_uuid(conn_handle, 
-                                      service->start_handle, 
-                                      service->end_handle, 
-                                      &target_chr_uuid.u, 
-                                      ble_on_disc_chr, 
-                                      NULL);
+            // Discover ALL characteristics in this service
+            ble_gattc_disc_all_chrs(conn_handle, 
+                                   service->start_handle, 
+                                   service->end_handle,
+                                   ble_on_disc_chr, 
+                                   NULL);
         }
     } else if (error->status == BLE_HS_EDONE) {
         ESP_LOGD(TAG_BLE, "Service discovery complete");
@@ -326,10 +349,25 @@ static int ble_on_disc_svc(uint16_t conn_handle, const struct ble_gatt_error *er
     return 0;
 }
 
-// ==========================================================
-// ===== GAP Event Handler (Connection & Scanning) ==========
-// ==========================================================
+// ===== Parse Advertisement for Pairing State =====
+static bool parse_camera_adv_data(const uint8_t *data, uint8_t len)
+{
+    // Look for the 0x22 flag that indicates pairing readiness
+    for (int i = 1; i < len; i++) {
+        if (data[i-1] == 0x22) {
+            if ((data[i] & 0x40) == 0x40 && (data[i] & 0x02) == 0x02) {
+                ESP_LOGI(TAG_BLE, "Camera is ready for pairing!");
+                return true;
+            } else {
+                ESP_LOGI(TAG_BLE, "Camera found but not ready for pairing");
+                return false;
+            }
+        }
+    }
+    return false;
+}
 
+// ===== GAP Event Handler =====
 static int ble_gap_event(struct ble_gap_event *event, void *arg)
 {
     struct ble_hs_adv_fields fields;
@@ -337,29 +375,30 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
 
     switch (event->type) {
         case BLE_GAP_EVENT_DISC:
-            // Event triggered for each advertisement packet received
             rc = ble_hs_adv_parse_fields(&fields, event->disc.data, event->disc.length_data);
             if (rc != 0) return 0;
 
-            // Check if name matches
             if (fields.name_len == strlen(BLE_DEVICE_NAME) &&
                 memcmp(fields.name, BLE_DEVICE_NAME, fields.name_len) == 0) {
                 
-                ESP_LOGI(TAG_BLE, "Found target device: %s", BLE_DEVICE_NAME);
+                ESP_LOGI(TAG_BLE, "Found camera: %s", BLE_DEVICE_NAME);
                 
-                // Stop scanning explicitly
+                // Parse advertisement data to check pairing state
+                camera_ready_to_pair = parse_camera_adv_data(event->disc.data, 
+                                                             event->disc.length_data);
+                should_pair = camera_ready_to_pair;
+                
                 ble_gap_disc_cancel();
 
-                // Connect
-                rc = ble_gap_connect(BLE_OWN_ADDR_PUBLIC, // Use your own address type
-                     &event->disc.addr,
-                     30000, 
-                     NULL,
-                     ble_gap_event, NULL);
+                // Connect to camera
+                rc = ble_gap_connect(BLE_OWN_ADDR_PUBLIC,
+                                    &event->disc.addr,
+                                    30000, 
+                                    NULL,
+                                    ble_gap_event, NULL);
                 
                 if (rc != 0) {
-                    ESP_LOGE(TAG_BLE, "Failed to initiate connection, rc=%d", rc);
-                    // Restart scan if connect failed immediately
+                    ESP_LOGE(TAG_BLE, "Failed to connect, rc=%d", rc);
                     ble_scan_start();
                 }
             }
@@ -367,21 +406,27 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
 
         case BLE_GAP_EVENT_CONNECT:
             if (event->connect.status == 0) {
-                ESP_LOGI(TAG_BLE, "Connected to device!");
+                ESP_LOGI(TAG_BLE, "Connected to camera!");
                 ble_connected = true;
                 ble_conn_handle = event->connect.conn_handle;
 
-                ESP_LOGI(TAG_BLE, "Initiating Security/Pairing...");
-                int rc = ble_gap_security_initiate(ble_conn_handle);
-                if (rc != 0) {
-                    ESP_LOGE(TAG_BLE, "Security initiate failed: rc=%d", rc);
+                // Only initiate pairing if camera is ready
+                if (should_pair) {
+                    ESP_LOGI(TAG_BLE, "Initiating pairing...");
+                    rc = ble_gap_security_initiate(ble_conn_handle);
+                    if (rc != 0) {
+                        ESP_LOGE(TAG_BLE, "Security initiate failed: rc=%d", rc);
+                    }
+                } else {
+                    ESP_LOGI(TAG_BLE, "Attempting connection without pairing...");
                 }
 
-                // Discover target service (128-bit)
+                // Discover services
                 ble_uuid128_t target_uuid;
-                ble_uuid_init_from_buf((ble_uuid_any_t *)&target_uuid, target_service_uuid_bytes, 16);
-
-                ble_gattc_disc_svc_by_uuid(ble_conn_handle, &target_uuid.u, ble_on_disc_svc, NULL);
+                ble_uuid_init_from_buf((ble_uuid_any_t *)&target_uuid, 
+                                      target_service_uuid_bytes, 16);
+                ble_gattc_disc_svc_by_uuid(ble_conn_handle, &target_uuid.u, 
+                                          ble_on_disc_svc, NULL);
             } else {
                 ESP_LOGE(TAG_BLE, "Connection failed; status=%d", event->connect.status);
                 ble_scan_start();
@@ -391,18 +436,49 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
         case BLE_GAP_EVENT_DISCONNECT:
             ESP_LOGI(TAG_BLE, "Disconnected. Reason=%d", event->disconnect.reason);
             ble_connected = false;
-            ble_char_val_handle = 0;
+            ble_char_command_handle = 0;
+            ble_char_notify_handle = 0;
             
-            // Auto-reconnect
             vTaskDelay(pdMS_TO_TICKS(1000));
             ble_scan_start();
             break;
+
+        case BLE_GAP_EVENT_ENC_CHANGE:
+            ESP_LOGI(TAG_BLE, "Encryption change event; status=%d", 
+                    event->enc_change.status);
+            if (event->enc_change.status == 0) {
+                ESP_LOGI(TAG_BLE, "Encryption enabled successfully");
+            }
+            break;
+
+        case BLE_GAP_EVENT_PASSKEY_ACTION:
+            ESP_LOGI(TAG_BLE, "Passkey action event");
             
+            if (event->passkey.params.action == BLE_SM_IOACT_NUMCMP) {
+                ESP_LOGI(TAG_BLE, "Numeric comparison: confirm=%d", 
+                        event->passkey.params.numcmp);
+                // Auto-confirm pairing
+                struct ble_sm_io pk = {0};
+                pk.action = event->passkey.params.action;
+                pk.numcmp_accept = 1;  // Accept the pairing
+                ble_sm_inject_io(event->passkey.conn_handle, &pk);
+            } else if (event->passkey.params.action == BLE_SM_IOACT_NONE) {
+                ESP_LOGI(TAG_BLE, "Pairing in progress...");
+            }
+            break;
+
         case BLE_GAP_EVENT_MTU:
-             ESP_LOGI(TAG_BLE, "mtu update event; conn_handle=%d cid=%d mtu=%d",
-                 event->mtu.conn_handle,
-                 event->mtu.channel_id,
-                 event->mtu.value);
+            ESP_LOGI(TAG_BLE, "MTU update: conn_handle=%d mtu=%d",
+                    event->mtu.conn_handle, event->mtu.value);
+            break;
+
+        case BLE_GAP_EVENT_NOTIFY_RX:
+            ble_on_notify(event->notify_rx.conn_handle, 
+                         &(struct ble_gatt_error){.status = 0},
+                         &(struct ble_gatt_attr){
+                             .handle = event->notify_rx.attr_handle,
+                             .om = event->notify_rx.om
+                         }, NULL);
             break;
 
         default:
@@ -411,70 +487,76 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
     return 0;
 }
 
+// ===== Start Scanning =====
 static void ble_scan_start(void)
 {
     if (ble_connected) return;
 
     ESP_LOGI(TAG_BLE, "Starting scan for %s...", BLE_DEVICE_NAME);
 
-    struct ble_gap_disc_params disc_params;
-    memset(&disc_params, 0, sizeof(disc_params));
-    
+    struct ble_gap_disc_params disc_params = {0};
     disc_params.filter_duplicates = 1;
-    disc_params.passive = 0; // Active scanning
-    disc_params.itvl = 0;    // Default scan interval
-    disc_params.window = 0;  // Default scan window
+    disc_params.passive = 0;
+    disc_params.itvl = 0;
+    disc_params.window = 0;
 
-    int rc = ble_gap_disc(BLE_OWN_ADDR_PUBLIC, BLE_HS_FOREVER, &disc_params, ble_gap_event, NULL);
+    int rc = ble_gap_disc(BLE_OWN_ADDR_PUBLIC, BLE_HS_FOREVER, 
+                         &disc_params, ble_gap_event, NULL);
     if (rc != 0) {
-        ESP_LOGE(TAG_BLE, "Error initiating gap discovery; rc=%d", rc);
+        ESP_LOGE(TAG_BLE, "Error initiating discovery; rc=%d", rc);
     }
 }
 
-// ==========================================================
-// ===== Public Helper Functions ============================
-// ==========================================================
-
-// Send data to BLE characteristic
-esp_err_t ble_send_data(uint8_t *data, size_t len)
+// ===== Send BLE Command =====
+esp_err_t ble_send_command(uint8_t *data, size_t len)
 {
-    if (!ble_connected || ble_char_val_handle == 0) {
-        ESP_LOGW(TAG_BLE, "Cannot send: BLE not connected or char not found");
+    if (!ble_connected || ble_char_command_handle == 0) {
+        ESP_LOGW(TAG_BLE, "Cannot send: not connected");
         return ESP_ERR_INVALID_STATE;
     }
 
-    // write_no_rsp_flat is equivalent to WRITE_TYPE_NO_RSP
-    int rc = ble_gattc_write_no_rsp_flat(ble_conn_handle, ble_char_val_handle, data, len);
-
+    int rc = ble_gattc_write_no_rsp_flat(ble_conn_handle, 
+                                        ble_char_command_handle, 
+                                        data, len);
     if (rc != 0) {
-        ESP_LOGE(TAG_BLE, "BLE write failed: %d", rc);
+        ESP_LOGE(TAG_BLE, "Write failed: %d", rc);
         return ESP_FAIL;
-    } else {
-        ESP_LOGI(TAG_BLE, "BLE data sent: %d bytes", len);
     }
+    
+    ESP_LOGI(TAG_BLE, "Command sent: %d bytes", len);
     return ESP_OK;
 }
 
-// NimBLE Host Task
+// ===== NimBLE Host Task =====
 void ble_host_task(void *param)
 {
     ESP_LOGI(TAG_BLE, "BLE Host Task Started");
-    // This function will return only when nimble_port_stop() is executed
     nimble_port_run();
     nimble_port_freertos_deinit();
 }
 
-// Callback when the stack is synced (ready)
+// ===== On Sync Callback =====
 void ble_on_sync(void)
 {
-    int rc = ble_hs_util_ensure_addr(0); // Ensure we have a random address if no public
-    if (rc != 0) ESP_LOGE(TAG_BLE, "Device has no address");
+    int rc = ble_hs_util_ensure_addr(0);
+    if (rc != 0) {
+        ESP_LOGE(TAG_BLE, "Error ensuring address; rc=%d", rc);
+        return;
+    }
+
+    // Set device name
+    ble_svc_gap_device_name_set("ESP32-Camera-Remote");
     
-    // Start scanning automatically on sync
     ble_scan_start();
 }
 
-// Initialize BLE Client
+// ===== On Reset Callback =====
+void ble_on_reset(int reason)
+{
+    ESP_LOGE(TAG_BLE, "BLE reset, reason=%d", reason);
+}
+
+// ===== Initialize BLE =====
 void ble_client_init(void)
 {
     esp_err_t ret = nvs_flash_init();
@@ -484,20 +566,27 @@ void ble_client_init(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    // 1. Initialize NimBLE port
+    // Initialize NimBLE
     nimble_port_init();
-    
-    // 3. Start the FreeRTOS task for NimBLE
-    nimble_port_freertos_init(ble_host_task);
-}
 
-// Re-connect helper (Maps to your old function)
-void ble_connect_to_device(void)
-{
-    // In NimBLE, we just restart scanning to find and connect
-    if (!ble_connected) {
-        ble_scan_start();
-    }
+    // Configure security
+    ble_hs_cfg.sm_io_cap = BLE_SM_IO_CAP_NO_IO;  // No input/output capability
+    ble_hs_cfg.sm_bonding = 1;                   // Enable bonding
+    ble_hs_cfg.sm_mitm = 0;                      // No MITM protection
+    ble_hs_cfg.sm_sc = 1;                        // Secure connections
+    ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+    ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+
+    // Set callbacks
+    ble_hs_cfg.sync_cb = ble_on_sync;
+    ble_hs_cfg.reset_cb = ble_on_reset;
+
+    // Initialize services
+    ble_svc_gap_init();
+    ble_svc_gatt_init();
+
+    // Start the task
+    nimble_port_freertos_init(ble_host_task);
 }
 
 // ===== Accessor Functions (Minor safety fix added) =====
