@@ -479,12 +479,12 @@ static void esp_now_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t 
                     if (cmd_entry->ble_data != NULL && cmd_entry->ble_data_len > 0)
                     {
                         printf("Sending BLE data for command_id: %d\n", cmd_value);
-                        esp_err_t ret = ble_send_command(cmd_entry->ble_data, 
+                        /* esp_err_t ret = ble_send_command(cmd_entry->ble_data, 
                                                        cmd_entry->ble_data_len);
                         
                         if (ret != ESP_OK) {
                             ESP_LOGW(TAG, "Failed to send BLE data for cmd: %d", cmd_value);
-                        }
+                        } */
                     }
                 }
             }
@@ -903,13 +903,13 @@ void detect_Task(void *arg)
                     {
                         if (cmd_entry->ble_data != NULL && cmd_entry->ble_data_len > 0)
                         {
-                            printf("Sending BLE data for command_id: %d\n", mn_result->command_id[0]);
+                            /* printf("Sending BLE data for command_id: %d\n", mn_result->command_id[0]);
                             esp_err_t ret = ble_send_command(cmd_entry->ble_data, 
                                                         cmd_entry->ble_data_len);
                             
                             if (ret != ESP_OK) {
                                 ESP_LOGW(TAG, "Failed to send BLE data for cmd: %d", mn_result->command_id[0]);
-                            }
+                            } */
                         }
                     }
                 }
@@ -1663,8 +1663,6 @@ static void button_multiple_click_cb(void *arg, void *usr_data)
     printf("Multiple click\n");
     // Initialize BLE client
     ble_client_init();
-    // Connect to BLE device
-    ble_scan_start();
 }
 
 static esp_err_t init_button(void)
