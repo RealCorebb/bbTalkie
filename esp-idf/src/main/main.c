@@ -60,6 +60,8 @@
 #include "include/animation.h"
 #include "include/command_map.h"
 
+#include "include/bleCamera.h"
+
 #include "include/fonts/fusion_pixel.h"
 #include "include/fonts/fusion_pixel_30.h"
 
@@ -85,7 +87,7 @@
 #define SPI_CS_PIN_NUM 10
 #define DC_PIN_NUM 12
 #define RST_PIN_NUM 11
-#define SPI_HOST_TAG SPI2_HOST
+#define SPI_HOST_TAG_BLE SPI2_HOST
 
 #define GPIO_WAKEUP_1 GPIO_NUM_4 // Charger CHRG
 #define GPIO_WAKEUP_2 GPIO_NUM_8 // Button
@@ -152,7 +154,7 @@ int state = 0; // 0: idle, 1: speaking, 2: receiving, 3: command
 int lastState = -1;
 static button_handle_t btn = NULL;
 static bool button_initialized = false;
-static const char *TAG = "bbTalkie";
+static const char *TAG_BLE = "bbTalkie";
 spi_device_handle_t oled_dev_handle;
 struct spi_ssd1327 spi_ssd1327 = {
     .dc_pin_num = DC_PIN_NUM,
@@ -223,11 +225,11 @@ static void esp_now_send_cb(const uint8_t *mac_addr, esp_now_send_status_t statu
 {
     if (status == ESP_NOW_SEND_SUCCESS)
     {
-        // ESP_LOGI(TAG, "ESP-NOW data sent successfully");
+        // ESP_LOGI(TAG_BLE, "ESP-NOW data sent successfully");
     }
     else
     {
-        ESP_LOGW(TAG, "ESP-NOW data send failed");
+        ESP_LOGW(TAG_BLE, "ESP-NOW data send failed");
     }
 }
 
@@ -242,11 +244,11 @@ void send_data_esp_now(const uint8_t *data, size_t len)
         esp_err_t ret = esp_now_send(broadcast_mac, data + offset, chunk_size);
         if (ret != ESP_OK)
         {
-            ESP_LOGE(TAG, "ESP-NOW send failed at offset %zu: %s", offset, esp_err_to_name(ret));
+            ESP_LOGE(TAG_BLE, "ESP-NOW send failed at offset %zu: %s", offset, esp_err_to_name(ret));
         }
         else
         {
-            // ESP_LOGI(TAG, "Sent %zu bytes of data via ESP-NOW (offset %zu)", chunk_size, offset);
+            // ESP_LOGI(TAG_BLE, "Sent %zu bytes of data via ESP-NOW (offset %zu)", chunk_size, offset);
         }
 
         offset += chunk_size;
@@ -399,13 +401,13 @@ static void esp_now_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t 
     // Log reception
     
     ESP_ERROR_CHECK(esp_wifi_connectionless_module_set_wake_interval(0));
-    ESP_LOGI(TAG, "Received %d bytes, RSSI: %d dBm", data_len, recv_info->rx_ctrl->rssi);
+    ESP_LOGI(TAG_BLE, "Received %d bytes, RSSI: %d dBm", data_len, recv_info->rx_ctrl->rssi);
 
     if (data_len == PING_MAGIC_LEN && memcmp(data, PING_MAGIC, PING_MAGIC_LEN) == 0) // PING MSG
     {
         int64_t now = esp_timer_get_time() / 1000; // ms
         bool found = false;
-        ESP_LOGI(TAG, "Received PING from %02x:%02x:%02x:%02x:%02x:%02x",
+        ESP_LOGI(TAG_BLE, "Received PING from %02x:%02x:%02x:%02x:%02x:%02x",
                  recv_info->src_addr[0], recv_info->src_addr[1],
                  recv_info->src_addr[2], recv_info->src_addr[3],
                  recv_info->src_addr[4], recv_info->src_addr[5]);
@@ -429,7 +431,7 @@ static void esp_now_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t 
                     memcpy(mac_track_list[i].mac, recv_info->src_addr, ESP_NOW_ETH_ALEN);
                     mac_track_list[i].last_seen_ms = now;
                     mac_track_list[i].valid = true;
-                    ESP_LOGI(TAG, "Added MAC");
+                    ESP_LOGI(TAG_BLE, "Added MAC");
                     macCount += 1;
                     break;
                 }
@@ -453,7 +455,7 @@ static void esp_now_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t 
 
             // Convert to integer
             int cmd_value = atoi(cmd_param);
-            ESP_LOGI(TAG, "Processed CMD: %d", cmd_value);
+            ESP_LOGI(TAG_BLE, "Processed CMD: %d", cmd_value);
 
             // Get command entry
             animation_map_entry_t *cmd_entry = get_command_entry_by_key(cmd_value);
@@ -483,14 +485,14 @@ static void esp_now_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t 
                                                        cmd_entry->ble_data_len);
                         
                         if (ret != ESP_OK) {
-                            ESP_LOGW(TAG, "Failed to send BLE data for cmd: %d", cmd_value);
+                            ESP_LOGW(TAG_BLE, "Failed to send BLE data for cmd: %d", cmd_value);
                         } */
                     }
                 }
             }
             else
             {
-                ESP_LOGW(TAG, "Unknown command: %d", cmd_value);
+                ESP_LOGW(TAG_BLE, "Unknown command: %d", cmd_value);
             }
         }
     }
@@ -508,7 +510,7 @@ static void esp_now_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t 
             }
             memcpy(msg_content, data + 4, content_len);
             msg_content[content_len] = '\0';
-            ESP_LOGI(TAG, "Processed MSG: %s", msg_content);
+            ESP_LOGI(TAG_BLE, "Processed MSG: %s", msg_content);
 
             // Create bubble text task for received message
             char *msg_copy = malloc(strlen(msg_content) + 1);
@@ -516,11 +518,11 @@ static void esp_now_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t 
             {
                 strcpy(msg_copy, msg_content);
                 xTaskCreate(bubble_text_task, "bubbleText", 4096, msg_copy, 5, NULL);
-                ESP_LOGI(TAG, "Created bubble_text_task for received message: %s", msg_content);
+                ESP_LOGI(TAG_BLE, "Created bubble_text_task for received message: %s", msg_content);
             }
             else
             {
-                ESP_LOGE(TAG, "Failed to allocate memory for bubble text message");
+                ESP_LOGE(TAG_BLE, "Failed to allocate memory for bubble text message");
             }
         }
     }
@@ -550,7 +552,7 @@ bool init_esp_now()
     esp_err_t ret = esp_wifi_init(&cfg);
     if (ret != ESP_OK)
     {
-        ESP_LOGE(TAG, "WiFi init failed: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG_BLE, "WiFi init failed: %s", esp_err_to_name(ret));
         return false;
     }
     
@@ -558,7 +560,7 @@ bool init_esp_now()
     ret = esp_wifi_set_mode(WIFI_MODE_STA);
     if (ret != ESP_OK)
     {
-        ESP_LOGE(TAG, "WiFi set mode failed: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG_BLE, "WiFi set mode failed: %s", esp_err_to_name(ret));
         return false;
     }
 
@@ -566,7 +568,7 @@ bool init_esp_now()
     ret = esp_wifi_start();
     if (ret != ESP_OK)
     {
-        ESP_LOGE(TAG, "WiFi start failed: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG_BLE, "WiFi start failed: %s", esp_err_to_name(ret));
         return false;
     }
 
@@ -574,7 +576,7 @@ bool init_esp_now()
     ret = esp_now_init();
     if (ret != ESP_OK)
     {
-        ESP_LOGE(TAG, "ESP-NOW init failed: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG_BLE, "ESP-NOW init failed: %s", esp_err_to_name(ret));
         return false;
     }
 
@@ -591,7 +593,7 @@ bool init_esp_now()
     ret = esp_now_add_peer(&peer_info);
     if (ret != ESP_OK && ret != ESP_ERR_ESPNOW_EXIST)
     {
-        ESP_LOGE(TAG, "Add broadcast peer failed: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG_BLE, "Add broadcast peer failed: %s", esp_err_to_name(ret));
         return false;
     }
 
@@ -601,7 +603,7 @@ bool init_esp_now()
     // Create receive queue (holds up to 10 messages)
     s_recv_queue = xQueueCreate(10, sizeof(esp_now_recv_data_t));
 
-    ESP_LOGI(TAG, "ESP-NOW initialized successfully");
+    ESP_LOGI(TAG_BLE, "ESP-NOW initialized successfully");
     return true;
 }
 
@@ -908,7 +910,7 @@ void detect_Task(void *arg)
                                                         cmd_entry->ble_data_len);
                             
                             if (ret != ESP_OK) {
-                                ESP_LOGW(TAG, "Failed to send BLE data for cmd: %d", mn_result->command_id[0]);
+                                ESP_LOGW(TAG_BLE, "Failed to send BLE data for cmd: %d", mn_result->command_id[0]);
                             } */
                         }
                     }
@@ -919,7 +921,7 @@ void detect_Task(void *arg)
                 if (cmd_len > 0 && cmd_len < sizeof(cmd_buffer))
                 {
                     send_data_esp_now((const uint8_t *)cmd_buffer, cmd_len);
-                    ESP_LOGI(TAG, "Sent CMD via ESP-NOW: %d", mn_result->command_id[0]);
+                    ESP_LOGI(TAG_BLE, "Sent CMD via ESP-NOW: %d", mn_result->command_id[0]);
                 }
             }
             if (mn_state == ESP_MN_STATE_TIMEOUT)
@@ -934,7 +936,7 @@ void detect_Task(void *arg)
                 if (msg_len > 0 && msg_len < sizeof(msg_buffer))
                 {
                     send_data_esp_now((const uint8_t *)msg_buffer, msg_len);
-                    ESP_LOGI(TAG, "Sent timeout MSG via ESP-NOW: %s", mn_result->string);
+                    ESP_LOGI(TAG_BLE, "Sent timeout MSG via ESP-NOW: %s", mn_result->string);
                 }
                 continue;
             }
@@ -1113,7 +1115,7 @@ void setup_oled(){
         .queue_size = 7,                    // We want to be able to queue 7 transactions at a time
     };
 
-    ESP_ERROR_CHECK(spi_bus_add_device(SPI_HOST_TAG, &dev_cfg, &oled_dev_handle));
+    ESP_ERROR_CHECK(spi_bus_add_device(SPI_HOST_TAG_BLE, &dev_cfg, &oled_dev_handle));
 
     /* 3. Initialize the remaining GPIO pins */
     gpio_config_t io_conf = {
@@ -1164,13 +1166,13 @@ void batteryLevel_Task(void *pvParameters)
         if (now - last_battery_check >= 60000 || prev_battery_level == -1)
         {
             int adc_raw = adc1_get_raw(ADC1_GPIO7_CHANNEL);
-            float voltage = (adc_raw * 2.2f / 4095.0f) * 2.0f; // Convert to actual battery voltage
+            float volTAG_BLEe = (adc_raw * 2.2f / 4095.0f) * 2.0f; // Convert to actual battery volTAG_BLEe
 
-            if (voltage >= 4.0f)
+            if (volTAG_BLEe >= 4.0f)
                 battery_level = 4;
-            else if (voltage >= 3.8f)
+            else if (volTAG_BLEe >= 3.8f)
                 battery_level = 3;
-            else if (voltage >= 3.6f)
+            else if (volTAG_BLEe >= 3.6f)
                 battery_level = 2;
             else
                 battery_level = 1;
@@ -1380,13 +1382,13 @@ void charging_Task(void *pvParameters)
         if (now - last_battery_check >= 60000 || prev_battery_level == -1)
         {
             int adc_raw = adc1_get_raw(ADC1_GPIO7_CHANNEL);
-            float voltage = (adc_raw * 2.2f / 4095.0f) * 2.0f; // Convert to actual battery voltage
+            float volTAG_BLEe = (adc_raw * 2.2f / 4095.0f) * 2.0f; // Convert to actual battery volTAG_BLEe
 
-            if (voltage >= 4.0f)
+            if (volTAG_BLEe >= 4.0f)
                 battery_level = 4;
-            else if (voltage >= 3.8f)
+            else if (volTAG_BLEe >= 3.8f)
                 battery_level = 3;
-            else if (voltage >= 3.6f)
+            else if (volTAG_BLEe >= 3.6f)
                 battery_level = 2;
             else
                 battery_level = 1;
@@ -1443,7 +1445,7 @@ void charging_Task(void *pvParameters)
 
 void ws2812_init(void)
 {
-    ESP_LOGI(TAG, "Initializing WS2812 LED strip");
+    ESP_LOGI(TAG_BLE, "Initializing WS2812 LED strip");
 
     // LED strip general initialization
     led_strip_config_t strip_config = {
@@ -1487,7 +1489,7 @@ static void transition_to_color(led_color_t from, led_color_t to)
 
 void led_control_task(void *pvParameters)
 {
-    ESP_LOGI(TAG, "LED control task started");
+    ESP_LOGI(TAG_BLE, "LED control task started");
 
     // Define color states
     led_color_t darker_teal = {DARKER_TEAL_R, DARKER_TEAL_G, DARKER_TEAL_B};
@@ -1536,7 +1538,7 @@ void led_control_task(void *pvParameters)
         // Handle state transitions
         if (desired_state != current_state)
         {
-            ESP_LOGI(TAG, "State change: %d -> %d", current_state, desired_state);
+            ESP_LOGI(TAG_BLE, "State change: %d -> %d", current_state, desired_state);
             previous_state = current_state;
 
             switch (desired_state)
@@ -1661,8 +1663,25 @@ static void button_double_click_cb(void *arg, void *usr_data)
 static void button_multiple_click_cb(void *arg, void *usr_data)
 {
     printf("Multiple click\n");
-    // Initialize BLE client
+
     ble_client_init();
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(10000)); // Wait 10 seconds
+        
+        ESP_LOGI(TAG_BLE, "Taking photo...");
+    
+        write_command(PRESS_TO_FOCUS, sizeof(PRESS_TO_FOCUS));
+        vTaskDelay(pdMS_TO_TICKS(100));
+        
+        write_command(TAKE_PICTURE, sizeof(TAKE_PICTURE));
+        vTaskDelay(pdMS_TO_TICKS(100));
+        
+        write_command(SHUTTER_RELEASED, sizeof(SHUTTER_RELEASED));
+        vTaskDelay(pdMS_TO_TICKS(100));
+        
+        write_command(HOLD_FOCUS, sizeof(HOLD_FOCUS));
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
 }
 
 static esp_err_t init_button(void)
@@ -1825,12 +1844,12 @@ void app_main()
 
     // Continue with the rest of your initialization
     init_audio_stream_buffer();
-    xTaskCreatePinnedToCore(oled_task, "oled", 4 * 1024, NULL, 5, NULL, 0);
-    xTaskCreatePinnedToCore(boot_sound, "bootSound", 3 * 1024, NULL, 5, NULL, 1);
-    xTaskCreatePinnedToCore(&feed_Task, "feed", 8 * 1024, (void *)afe_data, 5, NULL, 0);
-    xTaskCreatePinnedToCore(&detect_Task, "detect", 4 * 1024, (void *)afe_data, 5, NULL, 1);
-    xTaskCreatePinnedToCore(decode_Task, "decode", 4 * 1024, NULL, 5, NULL, 0);
-    xTaskCreatePinnedToCore(i2s_writer_task, "i2sWriter", 4 * 1024, NULL, 5, NULL, 0);
-    xTaskCreate(ping_task, "ping", 3 * 1024, NULL, 5, NULL);
-    xTaskCreate(led_control_task, "led_control", 3 * 1024, NULL, 5, NULL);
+    //xTaskCreatePinnedToCore(oled_task, "oled", 4 * 1024, NULL, 5, NULL, 0);
+    //xTaskCreatePinnedToCore(boot_sound, "bootSound", 3 * 1024, NULL, 5, NULL, 1);
+    //xTaskCreatePinnedToCore(&feed_Task, "feed", 8 * 1024, (void *)afe_data, 5, NULL, 0);
+    //xTaskCreatePinnedToCore(&detect_Task, "detect", 4 * 1024, (void *)afe_data, 5, NULL, 1);
+    //xTaskCreatePinnedToCore(decode_Task, "decode", 4 * 1024, NULL, 5, NULL, 0);
+    //xTaskCreatePinnedToCore(i2s_writer_task, "i2sWriter", 4 * 1024, NULL, 5, NULL, 0);
+    //xTaskCreate(ping_task, "ping", 3 * 1024, NULL, 5, NULL);
+    //xTaskCreate(led_control_task, "led_control", 3 * 1024, NULL, 5, NULL);
 }
