@@ -474,21 +474,6 @@ static void esp_now_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t 
                     lastState = -1;
                     is_command = true;
                 }
-
-                // Handle BLE transmission if configured
-                if (cmd_entry->cmd_type == CMD_TYPE_BLE_SEND)
-                {
-                    if (cmd_entry->ble_data != NULL && cmd_entry->ble_data_len > 0)
-                    {
-                        printf("Sending BLE data for command_id: %d\n", cmd_value);
-                        /* esp_err_t ret = ble_send_command(cmd_entry->ble_data, 
-                                                       cmd_entry->ble_data_len);
-                        
-                        if (ret != ESP_OK) {
-                            ESP_LOGW(TAG_BLE, "Failed to send BLE data for cmd: %d", cmd_value);
-                        } */
-                    }
-                }
             }
             else
             {
@@ -905,13 +890,8 @@ void detect_Task(void *arg)
                     {
                         if (cmd_entry->ble_data != NULL && cmd_entry->ble_data_len > 0)
                         {
-                            /* printf("Sending BLE data for command_id: %d\n", mn_result->command_id[0]);
-                            esp_err_t ret = ble_send_command(cmd_entry->ble_data, 
-                                                        cmd_entry->ble_data_len);
-                            
-                            if (ret != ESP_OK) {
-                                ESP_LOGW(TAG_BLE, "Failed to send BLE data for cmd: %d", mn_result->command_id[0]);
-                            } */
+                            printf("Sending BLE data for command_id: %d\n", mn_result->command_id[0]);
+                            write_command(cmd_entry->ble_data, cmd_entry->ble_data_len);
                         }
                     }
                 }
@@ -1665,23 +1645,6 @@ static void button_multiple_click_cb(void *arg, void *usr_data)
     printf("Multiple click\n");
 
     ble_client_init();
-    while (1) {
-        vTaskDelay(pdMS_TO_TICKS(10000)); // Wait 10 seconds
-        
-        ESP_LOGI(TAG_BLE, "Taking photo...");
-    
-        write_command(PRESS_TO_FOCUS, sizeof(PRESS_TO_FOCUS));
-        vTaskDelay(pdMS_TO_TICKS(100));
-        
-        write_command(TAKE_PICTURE, sizeof(TAKE_PICTURE));
-        vTaskDelay(pdMS_TO_TICKS(100));
-        
-        write_command(SHUTTER_RELEASED, sizeof(SHUTTER_RELEASED));
-        vTaskDelay(pdMS_TO_TICKS(100));
-        
-        write_command(HOLD_FOCUS, sizeof(HOLD_FOCUS));
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
 }
 
 static esp_err_t init_button(void)
@@ -1757,7 +1720,7 @@ void app_main()
 
     init_esp_now();
 
-    ESP_ERROR_CHECK(esp_board_init(SAMPLE_RATE, 1, BIT_DEPTH));
+     ESP_ERROR_CHECK(esp_board_init(SAMPLE_RATE, 1, BIT_DEPTH));
 
     models = esp_srmodel_init("model");
     afe_config_t *afe_config = afe_config_init(esp_get_input_format(), models, AFE_TYPE_SR, AFE_MODE_LOW_COST);
@@ -1766,6 +1729,7 @@ void app_main()
     afe_config->vad_min_speech_ms = 128;
     afe_config->vad_mode = VAD_MODE_1;  // The larger the mode, the higher the speech trigger probability.
     afe_config->afe_linear_gain = 2.0;
+    afe_config->aec_init = false;
 
     afe_handle = esp_afe_handle_from_config(afe_config);
     esp_afe_sr_data_t *afe_data = afe_handle->create_from_config(afe_config);
@@ -1773,7 +1737,7 @@ void app_main()
 
     printf("afe_linear_gain:%f\n", afe_config->afe_linear_gain);
     printf("agc_init:%d, agc_mode:%d, agc_compression_gain_db:%d, agc_target_level_dbfs:%d\n", 
-           afe_config->agc_init, afe_config->agc_mode, afe_config->agc_compression_gain_db, afe_config->agc_target_level_dbfs);
+           afe_config->agc_init, afe_config->agc_mode, afe_config->agc_compression_gain_db, afe_config->agc_target_level_dbfs); 
 
     // Configure output GPIOs first
     gpio_config_t io_conf_3 = {
@@ -1846,8 +1810,8 @@ void app_main()
     init_audio_stream_buffer();
     //xTaskCreatePinnedToCore(oled_task, "oled", 4 * 1024, NULL, 5, NULL, 0);
     //xTaskCreatePinnedToCore(boot_sound, "bootSound", 3 * 1024, NULL, 5, NULL, 1);
-    //xTaskCreatePinnedToCore(&feed_Task, "feed", 8 * 1024, (void *)afe_data, 5, NULL, 0);
-    //xTaskCreatePinnedToCore(&detect_Task, "detect", 4 * 1024, (void *)afe_data, 5, NULL, 1);
+    xTaskCreatePinnedToCore(&feed_Task, "feed", 8 * 1024, (void *)afe_data, 5, NULL, 0);
+    xTaskCreatePinnedToCore(&detect_Task, "detect", 4 * 1024, (void *)afe_data, 5, NULL, 1);
     //xTaskCreatePinnedToCore(decode_Task, "decode", 4 * 1024, NULL, 5, NULL, 0);
     //xTaskCreatePinnedToCore(i2s_writer_task, "i2sWriter", 4 * 1024, NULL, 5, NULL, 0);
     //xTaskCreate(ping_task, "ping", 3 * 1024, NULL, 5, NULL);

@@ -11,6 +11,10 @@ typedef struct {
     size_t ble_data_len;    // Length of BLE data
 } animation_map_entry_t;
 
+static uint8_t record_down[] = {0x01, 0x0f};
+static uint8_t zoom_in[] = {0x02, 0x45, 0x80};
+static uint8_t zoom_out[] = {0x02, 0x47, 0x80};
+
 
 spi_oled_animation_t anim_turn_left = {
     .x = 14,
@@ -220,8 +224,10 @@ static animation_map_entry_t animation_map[] = {
     {13, &anim_walk, CMD_TYPE_ANIMATION, NULL, 0},
     {14, &anim_eat, CMD_TYPE_ANIMATION, NULL, 0},
     {15, &anim_drink, CMD_TYPE_ANIMATION, NULL, 0},
-    {16, &anim_add_oil, CMD_TYPE_ANIMATION, NULL, 0}//,
-    //{50, NULL, CMD_TYPE_BLE_SEND, cmd_focus_down, sizeof(cmd_focus_down)},
+    {16, &anim_add_oil, CMD_TYPE_ANIMATION, NULL, 0},
+    {50, NULL, CMD_TYPE_BLE_SEND, record_down, sizeof(record_down)},
+    {51, NULL, CMD_TYPE_BLE_SEND, zoom_in, sizeof(zoom_in)},
+    {52, NULL, CMD_TYPE_BLE_SEND, zoom_out, sizeof(zoom_out)}
 };
 
 // ===== Accessor Functions (Minor safety fix added) =====
