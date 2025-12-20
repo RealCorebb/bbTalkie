@@ -1,5 +1,4 @@
 build/
-sdkconfig
 sdkconfig.old
 target
 .vscode
