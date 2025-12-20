@@ -12,8 +12,8 @@ typedef struct {
 } animation_map_entry_t;
 
 static uint8_t record_down[] = {0x01, 0x0f};
-static uint8_t zoom_in[] = {0x02, 0x45, 0x80};
-static uint8_t zoom_out[] = {0x02, 0x47, 0x80};
+static uint8_t zoom_in[] = {0x02, 0x45, 0x16};
+static uint8_t zoom_out[] = {0x02, 0x47, 0x16};
 
 
 spi_oled_animation_t anim_turn_left = {
