@@ -441,7 +441,7 @@ void ble_client_init(void) {
     esp_ble_gap_set_security_param(ESP_BLE_SM_OOB_SUPPORT, &oob_support, sizeof(uint8_t));
 
     // Set device name
-    esp_ble_gap_set_device_name("nkg RC demo v0.1");
+    esp_ble_gap_set_device_name("bbTalkie");
 
     // Register profile callback
     gl_profile_tab[PROFILE_APP_ID].gattc_cb = gattc_profile_event_handler;

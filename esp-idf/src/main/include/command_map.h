@@ -14,6 +14,7 @@ typedef struct {
 static uint8_t record_down[] = {0x01, 0x0f};
 static uint8_t zoom_in[] = {0x02, 0x45, 0x16};
 static uint8_t zoom_out[] = {0x02, 0x47, 0x16};
+static uint8_t stop_zoom[] = {0x02, 0x44, 0x00, 0x02, 0x46, 0x00};
 
 
 spi_oled_animation_t anim_turn_left = {
@@ -227,7 +228,8 @@ static animation_map_entry_t animation_map[] = {
     {16, &anim_add_oil, CMD_TYPE_ANIMATION, NULL, 0},
     {50, NULL, CMD_TYPE_BLE_SEND, record_down, sizeof(record_down)},
     {51, NULL, CMD_TYPE_BLE_SEND, zoom_in, sizeof(zoom_in)},
-    {52, NULL, CMD_TYPE_BLE_SEND, zoom_out, sizeof(zoom_out)}
+    {52, NULL, CMD_TYPE_BLE_SEND, zoom_out, sizeof(zoom_out)},
+    {53, NULL, CMD_TYPE_BLE_SEND, stop_zoom, sizeof(stop_zoom)}
 };
 
 // ===== Accessor Functions (Minor safety fix added) =====
