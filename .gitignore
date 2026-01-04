@@ -1,4 +1,4 @@
-build/
+esp-idf/src/build/
 sdkconfig.old
 target
 .vscode
