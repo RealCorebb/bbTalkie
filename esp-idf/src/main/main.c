@@ -219,7 +219,8 @@ typedef struct
 } esp_now_recv_data_t;
 
 // Callback function called when data is sent
-static void esp_now_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status)
+static void esp_now_send_cb(const esp_now_send_info_t *tx_info, esp_now_send_status_t status)
+
 {
     if (status == ESP_NOW_SEND_SUCCESS)
     {
@@ -1654,6 +1655,7 @@ static esp_err_t init_button(void)
 
 void app_main()
 {
+    printf("Hello, World!\n");
     // Check which GPIO caused the wakeup (if any)
     ws2812_init();
     uint64_t wakeup_pin_mask = esp_sleep_get_ext1_wakeup_status();
@@ -1762,7 +1764,7 @@ void app_main()
     xTaskCreatePinnedToCore(oled_task, "oled", 4 * 1024, NULL, 5, NULL, 0);
     xTaskCreatePinnedToCore(boot_sound, "bootSound", 3 * 1024, NULL, 5, NULL, 1);
     xTaskCreatePinnedToCore(&feed_Task, "feed", 8 * 1024, (void *)afe_data, 5, NULL, 0);
-    xTaskCreatePinnedToCore(&detect_Task, "detect", 4 * 1024, (void *)afe_data, 5, NULL, 1);
+    xTaskCreatePinnedToCore(&detect_Task, "detect", 16 * 1024, (void *)afe_data, 5, NULL, 1);
     xTaskCreatePinnedToCore(decode_Task, "decode", 4 * 1024, NULL, 5, NULL, 0);
     xTaskCreatePinnedToCore(i2s_writer_task, "i2sWriter", 4 * 1024, NULL, 5, NULL, 0);
     xTaskCreate(ping_task, "ping", 3 * 1024, NULL, 5, NULL);
